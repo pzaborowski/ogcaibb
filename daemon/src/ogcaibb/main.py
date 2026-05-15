@@ -30,6 +30,8 @@ from .skills.registry import SkillRegistry
 from .tools import registry as tool_registry
 from .tracing.record import Signal, Trace, ToolCallRecord, env_meta, load_workstation_id, utcnow
 from .tracing.redactor import get_redactor
+from .tracing.signals.observer import SignalObserver
+from .tracing.signals.registry import get_signal
 from .tracing.transport import get_transport
 from .tracing.uploader import Uploader
 from .tracing.wal import WAL
@@ -67,6 +69,7 @@ async def lifespan(app: FastAPI):
     app.state.wal = None
     app.state.redactor = None
     app.state.uploader = None
+    app.state.signal_observer = None
     if settings.trace_enabled:
         try:
             app.state.workstation_id = load_workstation_id(settings.workstation_id_path)
@@ -101,10 +104,20 @@ async def lifespan(app: FastAPI):
                 schema_version=1,
             )
             app.state.uploader.start()
+
+            detectors = _build_signal_detectors()
+            if detectors:
+                app.state.signal_observer = SignalObserver(
+                    wal=app.state.wal,
+                    detectors=detectors,
+                    workstation_id=app.state.workstation_id,
+                    workspace_root=settings.workspace_root,
+                )
             log.info(
-                "trace capture enabled (dir=%s, transport=%s, workstation=%s)",
+                "trace capture enabled (dir=%s, transport=%s, workstation=%s, signals=%s)",
                 settings.trace_dir, settings.trace_transport,
                 app.state.workstation_id[:8],
+                [d.name for d in detectors] or "none",
             )
         except Exception as e:
             log.error("trace capture disabled due to setup error: %s", e)
@@ -117,6 +130,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if app.state.signal_observer is not None:
+            await app.state.signal_observer.stop()
         if app.state.uploader is not None:
             await app.state.uploader.stop()
         if app.state.wal is not None:
@@ -342,6 +357,22 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     return JSONResponse(completion)
 
 
+def _build_signal_detectors() -> list[Any]:
+    names = [n.strip() for n in settings.implicit_signals.split(",") if n.strip()]
+    out: list[Any] = []
+    for name in names:
+        kwargs: dict[str, Any] = {}
+        if name == "edit_retention":
+            kwargs["delay_seconds"] = settings.implicit_edit_retention_delay
+        elif name == "git_commit":
+            kwargs["delay_seconds"] = settings.implicit_git_commit_delay
+        try:
+            out.append(get_signal(name, **kwargs))
+        except ValueError as e:
+            log.warning("ignoring unknown implicit signal '%s': %s", name, e)
+    return out
+
+
 _RATING_TO_POLARITY: dict[str, int] = {
     "up": 1,
     "down": -1,
@@ -446,6 +477,14 @@ def _capture_trace(
         wal.append_trace(redactor.redact(trace))
     except Exception as e:
         log.warning("trace capture failed: %s", e)
+        return
+
+    observer: SignalObserver | None = getattr(app.state, "signal_observer", None)
+    if observer is not None:
+        try:
+            observer.schedule(trace)
+        except Exception as e:
+            log.warning("scheduling implicit signals failed: %s", e)
 
 
 def run() -> None:

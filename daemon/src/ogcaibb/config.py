@@ -59,6 +59,19 @@ class Settings(BaseSettings):
         alias="OGCAIBB_WORKSTATION_ID_PATH",
     )
 
+    # Comma-separated detector names. Empty string = disabled.
+    # Defaults to the cheap baseline; opt in to IO-heavy detectors per deployment.
+    implicit_signals: str = Field(
+        default="tool_call_completed_clean",
+        alias="OGCAIBB_IMPLICIT_SIGNALS",
+    )
+    implicit_edit_retention_delay: float = Field(
+        default=600.0, alias="OGCAIBB_IMPLICIT_EDIT_RETENTION_DELAY"
+    )
+    implicit_git_commit_delay: float = Field(
+        default=1800.0, alias="OGCAIBB_IMPLICIT_GIT_COMMIT_DELAY"
+    )
+
     # --- Hub client ---------------------------------------------------
     hub_url: str | None = Field(default=None, alias="OGCAIBB_HUB_URL")
     hub_auth: str = Field(default="apikey", alias="OGCAIBB_HUB_AUTH")

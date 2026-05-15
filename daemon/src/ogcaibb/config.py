@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     host: str = Field(default="127.0.0.1", alias="OGCAIBB_HOST")
     port: int = Field(default=4141, alias="OGCAIBB_PORT")
+    # Explicit base URL used by the CLI to talk back to a running daemon.
+    # When unset, the CLI derives it from host/port (with 0.0.0.0 → 127.0.0.1).
+    daemon_url: str | None = Field(default=None, alias="OGCAIBB_DAEMON_URL")
     workspace_root: Path = Field(default=Path.cwd(), alias="OGCAIBB_WORKSPACE_ROOT")
     log_level: str = Field(default="INFO", alias="OGCAIBB_LOG_LEVEL")
 

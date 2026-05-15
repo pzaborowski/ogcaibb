@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from . import endpoints
 from .api import health, ingest
 from .auth.base import HubAuth
 from .auth.registry import get_hub_auth
@@ -22,7 +23,7 @@ from .storage.registry import get_index_store, get_trace_store
 
 log = logging.getLogger("ogcaibb_hub")
 
-PUBLIC_PATHS = {"/healthz"}
+PUBLIC_PATHS = {endpoints.HEALTH}
 
 
 @asynccontextmanager

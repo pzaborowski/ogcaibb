@@ -10,6 +10,7 @@ import logging
 
 import httpx
 
+from . import endpoints
 from .auth.base import WorkstationAuth
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class HubClient:
 
     async def health(self) -> dict:
         resp = await self._client.get(
-            f"{self._hub_url}/healthz",
+            f"{self._hub_url}{endpoints.HEALTH}",
             headers=self._auth.headers(),
         )
         resp.raise_for_status()

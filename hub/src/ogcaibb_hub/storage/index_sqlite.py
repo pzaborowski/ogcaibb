@@ -11,7 +11,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from .base import TraceRow
+from .base import SignalRow, TraceRow
 
 log = logging.getLogger(__name__)
 
@@ -44,8 +44,10 @@ class SQLiteIndexStore:
                 polarity INTEGER NOT NULL,
                 weight REAL NOT NULL,
                 detected_at REAL NOT NULL,
+                comment TEXT,
                 PRIMARY KEY (trace_id, source, detected_at)
             );
+            CREATE INDEX IF NOT EXISTS signals_by_trace ON signals(trace_id);
             """
         )
         self._db.commit()
@@ -67,6 +69,34 @@ class SQLiteIndexStore:
         )
         self._db.commit()
         return cur.rowcount > 0
+
+    async def upsert_signal(self, *, row: SignalRow) -> bool:
+        cur = self._db.execute(
+            "INSERT OR IGNORE INTO signals"
+            "(trace_id, workstation_id, source, polarity, weight, detected_at, comment)"
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                row.trace_id,
+                row.workstation_id,
+                row.source,
+                row.polarity,
+                row.weight,
+                row.detected_at,
+                row.comment,
+            ),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
+
+    async def count_signals(self, *, trace_id: str | None = None) -> int:
+        if trace_id is None:
+            row = self._db.execute("SELECT COUNT(*) FROM signals").fetchone()
+        else:
+            row = self._db.execute(
+                "SELECT COUNT(*) FROM signals WHERE trace_id=?",
+                (trace_id,),
+            ).fetchone()
+        return int(row[0])
 
     async def count_traces(self, *, workstation_id: str | None = None) -> int:
         if workstation_id is None:

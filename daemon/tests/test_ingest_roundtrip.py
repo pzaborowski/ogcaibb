@@ -20,6 +20,7 @@ import pytest
 HUB_SRC = Path(__file__).resolve().parents[2] / "hub" / "src"
 sys.path.insert(0, str(HUB_SRC))
 
+from ogcaibb.hub_client import endpoints as hub_endpoints
 from ogcaibb.hub_client.auth.apikey import APIKeyAuth
 from ogcaibb.tracing.record import Trace
 from ogcaibb.tracing.transport.base import ChunkManifest
@@ -109,7 +110,7 @@ async def test_auth_rejected_without_token(tmp_path, hub_app):
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
             resp = await client.post(
-                "http://hub.invalid/v1/ingest",
+                f"http://hub.invalid{hub_endpoints.INGEST}",
                 content=b"",
                 headers={
                     "X-Schema-Version": "1",

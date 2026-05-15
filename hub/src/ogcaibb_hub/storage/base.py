@@ -34,6 +34,17 @@ class TraceRow:
     bytes_compressed: int
 
 
+@dataclass
+class SignalRow:
+    trace_id: str
+    workstation_id: str
+    source: str
+    polarity: int
+    weight: float
+    detected_at: float
+    comment: str | None = None
+
+
 class TraceStore(Protocol):
     name: str
 
@@ -58,6 +69,12 @@ class IndexStore(Protocol):
         """Insert a trace if new. Returns True for new, False for duplicate."""
         ...
 
+    async def upsert_signal(self, *, row: SignalRow) -> bool:
+        """Insert a signal if new (dedup on trace_id+source+detected_at)."""
+        ...
+
     async def count_traces(self, *, workstation_id: str | None = None) -> int: ...
+
+    async def count_signals(self, *, trace_id: str | None = None) -> int: ...
 
     async def close(self) -> None: ...

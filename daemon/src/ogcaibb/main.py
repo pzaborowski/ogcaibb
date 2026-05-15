@@ -22,12 +22,13 @@ from . import __version__ as DAEMON_VERSION
 from .agents.registry import AgentRegistry
 from .commands.parser import parse_slash_command
 from .config import settings
+from .hub_client import endpoints as hub_endpoints
 from .hub_client.auth import get_workstation_auth
 from .loop import LoopResult, run_turn, run_turn_stream
 from .ollama_client import OllamaUnavailable, get_client
 from .skills.registry import SkillRegistry
 from .tools import registry as tool_registry
-from .tracing.record import Trace, ToolCallRecord, env_meta, load_workstation_id
+from .tracing.record import Signal, Trace, ToolCallRecord, env_meta, load_workstation_id, utcnow
 from .tracing.redactor import get_redactor
 from .tracing.transport import get_transport
 from .tracing.uploader import Uploader
@@ -208,6 +209,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         system_prompt = (system_prompt + "\n\n" + skill_intro) if system_prompt else skill_intro
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+    trace_id = uuid.uuid4().hex
     created = int(time.time())
     model_name = req.model or settings.model_chat
 
@@ -231,6 +233,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     "object": "chat.completion.chunk",
                     "created": created,
                     "model": model_name,
+                    "ogcaibb_trace_id": trace_id,
                     "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
                 }
                 return f"data: {json.dumps(payload)}\n\n"
@@ -290,6 +293,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 )
                 _capture_trace(
                     request.app,
+                    trace_id=trace_id,
                     messages_in=messages,
                     result=synthetic,
                     agent_name=agent_name,
@@ -311,6 +315,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
     _capture_trace(
         request.app,
+        trace_id=trace_id,
         messages_in=messages,
         result=result,
         agent_name=agent_name,
@@ -328,14 +333,87 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         "model": result.model,
         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-        "ogcaibb": {"tool_calls": result.tool_calls, "reasoning": result.reasoning},
+        "ogcaibb": {
+            "trace_id": trace_id,
+            "tool_calls": result.tool_calls,
+            "reasoning": result.reasoning,
+        },
     }
     return JSONResponse(completion)
+
+
+_RATING_TO_POLARITY: dict[str, int] = {
+    "up": 1,
+    "down": -1,
+    "neutral": 0,
+    "1": 1,
+    "-1": -1,
+    "0": 0,
+}
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    rating: str = "up"          # accepts up | down | neutral (case-insensitive) or "1"/"-1"/"0"
+    source: str = "explicit"    # implicit detectors will use other source names
+    weight: float = 1.0
+    comment: str | None = None
+
+
+@app.post(hub_endpoints.FEEDBACK)
+async def post_feedback(req: FeedbackRequest, request: Request) -> dict[str, Any]:
+    """Record an explicit rating for a previously captured trace.
+
+    The signal is appended to the local WAL; the uploader ships it to the hub
+    on the same channel as traces, so explicit and implicit signals share one
+    delivery path.
+    """
+    wal = getattr(request.app.state, "wal", None)
+    workstation_id = getattr(request.app.state, "workstation_id", None)
+    if wal is None or not workstation_id:
+        raise HTTPException(503, "trace capture is disabled; cannot record feedback")
+    if not req.trace_id:
+        raise HTTPException(400, "trace_id is required")
+
+    rating_key = (req.rating or "").strip().lower()
+    polarity = _RATING_TO_POLARITY.get(rating_key)
+    if polarity is None:
+        raise HTTPException(
+            400, f"unknown rating {req.rating!r}; expected up|down|neutral or 1|-1|0"
+        )
+
+    weight = max(0.0, min(1.0, req.weight))
+    meta: dict[str, Any] = {}
+    if req.comment:
+        meta["comment"] = req.comment[:2000]
+
+    signal = Signal(
+        trace_id=req.trace_id,
+        workstation_id=workstation_id,
+        source=req.source or "explicit",
+        polarity=polarity,
+        weight=weight,
+        detected_at=utcnow(),
+        meta=meta,
+    )
+    try:
+        wal.append_signal(signal)
+    except Exception as e:
+        log.warning("feedback capture failed: %s", e)
+        raise HTTPException(500, f"failed to persist signal: {e}") from e
+
+    return {
+        "ok": True,
+        "trace_id": req.trace_id,
+        "source": signal.source,
+        "polarity": polarity,
+    }
 
 
 def _capture_trace(
     app: FastAPI,
     *,
+    trace_id: str,
     messages_in: list[dict[str, Any]],
     result: LoopResult,
     agent_name: str | None,
@@ -349,6 +427,7 @@ def _capture_trace(
         return
     try:
         trace = Trace(
+            trace_id=trace_id,
             workstation_id=workstation_id,
             daemon_version=DAEMON_VERSION,
             started_at=datetime.fromtimestamp(result.started_at or time.time(), tz=timezone.utc),

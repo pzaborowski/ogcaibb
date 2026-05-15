@@ -12,6 +12,7 @@ from rich.table import Table
 
 from .agents.registry import AgentRegistry
 from .config import settings
+from .hub_client import endpoints as hub_endpoints
 from .ollama_client import OllamaUnavailable, get_client
 from .skills.registry import SkillRegistry
 
@@ -19,6 +20,15 @@ app = typer.Typer(help="ogcaibb operator CLI")
 traces_app = typer.Typer(help="Inspect locally captured traces")
 app.add_typer(traces_app, name="traces")
 console = Console()
+
+
+def _daemon_base_url() -> str:
+    if settings.daemon_url:
+        return settings.daemon_url.rstrip("/")
+    host = settings.host
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:{settings.port}"
 
 
 @app.command()
@@ -79,6 +89,45 @@ def list_commands() -> None:
     for p in sorted(cdir.glob("*.md")):
         table.add_row(f"/{p.stem}", str(p.relative_to(cdir.parent)))
     console.print(table)
+
+
+@app.command()
+def feedback(
+    trace_id: str = typer.Argument(..., help="The trace_id returned by the chat completion."),
+    rating: str = typer.Option(
+        "up", "--rating", "-r",
+        help="up | down | neutral (or numeric 1|-1|0).",
+    ),
+    comment: str | None = typer.Option(None, "--comment", "-c"),
+    source: str = typer.Option("explicit", "--source", help="Override the signal source label."),
+    weight: float = typer.Option(1.0, "--weight", min=0.0, max=1.0),
+) -> None:
+    """Submit explicit feedback for a captured trace.
+
+    Sends to the local daemon at the configured host/port — the daemon writes
+    a Signal envelope to the WAL, which the uploader ships to the hub.
+    """
+    import httpx
+
+    payload = {
+        "trace_id": trace_id,
+        "rating": rating,
+        "source": source,
+        "weight": weight,
+    }
+    if comment:
+        payload["comment"] = comment
+
+    url = f"{_daemon_base_url()}{hub_endpoints.FEEDBACK}"
+    try:
+        resp = httpx.post(url, json=payload, timeout=10.0)
+    except httpx.HTTPError as e:
+        console.print(f"[red]could not reach daemon at {url}: {e}[/red]")
+        raise typer.Exit(1) from e
+    if resp.status_code >= 400:
+        console.print(f"[red]{resp.status_code}[/red] {resp.text}")
+        raise typer.Exit(1)
+    console.print(resp.json())
 
 
 @traces_app.command("status")

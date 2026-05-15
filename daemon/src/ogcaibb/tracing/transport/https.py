@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 
+from ...hub_client import endpoints
 from ...hub_client.auth.base import WorkstationAuth
 from .base import Ack, ChunkManifest, TransportError
 
@@ -42,7 +43,7 @@ class HTTPSTransport:
         }
         headers.update(self._auth.headers())
 
-        url = f"{self._hub_url}/v1/ingest"
+        url = f"{self._hub_url}{endpoints.INGEST}"
         try:
             resp = await self._client.post(url, content=body, headers=headers)
         except httpx.HTTPError as e:

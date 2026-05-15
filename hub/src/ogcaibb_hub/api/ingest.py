@@ -25,15 +25,37 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from .. import endpoints
 from ..auth.base import Identity
 from ..config import settings
-from ..storage.base import IngestSummary, TraceRow
+from ..storage.base import IngestSummary, SignalRow, TraceRow
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/v1/ingest")
+def _iso_to_epoch(value: Any) -> float | None:
+    """Tolerant parser for the `detected_at` field on signals.
+
+    The workstation always emits ISO-8601 UTC strings via Pydantic's default
+    serializer, but accept epoch floats too in case a future signal source
+    skips the model layer.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        from datetime import datetime
+
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+@router.post(endpoints.INGEST)
 async def ingest(
     request: Request,
     x_schema_version: int = Header(...),
@@ -105,8 +127,24 @@ async def ingest(
             else:
                 summary.duplicates += 1
         elif kind == "signal":
-            # v0.1: stored but not indexed beyond what /feedback will do next.
-            summary.accepted += 1
+            try:
+                sig_row = SignalRow(
+                    trace_id=str(payload["trace_id"]),
+                    workstation_id=str(payload.get("workstation_id", x_workstation_id)),
+                    source=str(payload.get("source", "explicit")),
+                    polarity=int(payload.get("polarity", 0)),
+                    weight=float(payload.get("weight", 1.0)),
+                    detected_at=_iso_to_epoch(payload.get("detected_at")) or received_at,
+                    comment=(payload.get("meta") or {}).get("comment"),
+                )
+            except (KeyError, ValueError, TypeError) as e:
+                summary.errors.append(f"line {lineno}: bad signal: {e}")
+                continue
+            new = await index_store.upsert_signal(row=sig_row)
+            if new:
+                summary.accepted += 1
+            else:
+                summary.duplicates += 1
         else:
             summary.errors.append(f"line {lineno}: unknown kind={kind!r}")
 

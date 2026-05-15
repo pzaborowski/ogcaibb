@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./.venv/bin/python -m pytest daemon/tests/test_redactor.py daemon/tests/test_wal.py -q)",
+      "Bash(./.venv/bin/python *)",
+      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -c ' *)",
+      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m pytest /Users/piotr/repos/seadots/ogcaibb/daemon/tests -q)",
+      "Bash(OGCAIBB_TRACE_DIR=/tmp/ogcaibb-smoke-traces ./.venv/bin/python -m ogcaibb.cli traces status)",
+      "Bash(PYTHONPATH=src /Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m ogcaibb_hub.cli issue-key --name smoke-test)",
+      "Bash(PYTHONPATH=/Users/piotr/repos/seadots/ogcaibb/hub/src /Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m ogcaibb_hub.cli issue-key --name smoke-test)",
+      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m pytest /Users/piotr/repos/seadots/ogcaibb/daemon/tests/test_ingest_roundtrip.py -q)"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+# Drop this into your bblock repo root (or ~/.aider.conf.yml).
+# aider talks to the ogcaibb daemon via its OpenAI-compatible endpoint.
+
+openai-api-base: http://localhost:4141/v1
+openai-api-key: not-used
+
+model: qwen2.5-coder:32b-instruct
+weak-model: qwen2.5:7b-instruct
+edit-format: diff
+
+# We don't auto-commit — let the user review and commit through the daemon's
+# bblock-aware workflows (e.g. /validate-bblock before /commit).
+auto-commits: false
+dirty-commits: false

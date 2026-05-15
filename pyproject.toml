@@ -1,0 +1,58 @@
+[project]
+name = "ogcaibb"
+version = "0.1.0"
+description = "Local AI toolset for OGC Building Block repositories, backed by a shared Ollama server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Piotr Zaborowski" },
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pydantic-ai>=0.0.14",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6.0",
+    "python-frontmatter>=1.1",
+    "rich>=13.9",
+    "typer>=0.13",
+    "jsonschema>=4.23",
+    "pyld>=2.0.4",
+    "owslib>=0.31",
+    "docker>=7.1",
+    "chromadb>=0.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "respx>=0.21",
+]
+
+[project.scripts]
+ogcaibb = "ogcaibb.cli:app"
+ogcaibb-daemon = "ogcaibb.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["daemon/src/ogcaibb"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["daemon/tests"]

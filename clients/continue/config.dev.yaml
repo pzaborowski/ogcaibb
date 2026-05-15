@@ -1,0 +1,44 @@
+# Drop this into ~/.continue/config.yaml (or a per-workspace .continue/config.yaml).
+# Continue.dev talks to the ogcaibb daemon as if it were OpenAI — the daemon
+# adds tools, skills, agents, memory, and Ollama on top.
+
+name: ogcaibb
+version: 0.1.0
+schema: v1
+
+models:
+  - name: ogcaibb-chat
+    provider: openai
+    model: qwen3:4b
+    apiBase: http://localhost:4141/v1
+    apiKey: not-used
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 32768
+
+  - name: ogcaibb-autocomplete
+    provider: openai
+    model: qwen3:4b
+    apiBase: http://localhost:4141/v1
+    apiKey: not-used
+    roles:
+      - autocomplete
+
+# Slash commands are passed through verbatim to the daemon, which parses them
+# and expands the matching commands/<name>.md before calling the model.
+prompts:
+  - name: validate-bblock
+    description: Validate an OGC building block via Docker
+    prompt: "/validate-bblock {{{ input }}}"
+  - name: marine-bblock
+    description: Discover marine data and generate a building block
+    prompt: "/marine-bblock {{{ input }}}"
+  - name: generate-metadata
+    description: Generate STAC/DCAT metadata from a URL or file
+    prompt: "/generate-metadata {{{ input }}}"
+  - name: check-in
+    description: Register a new data source and stage a bblock
+    prompt: "/check-in {{{ input }}}"

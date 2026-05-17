@@ -31,8 +31,10 @@ class OllamaClient:
         self._client = httpx.AsyncClient(
             base_url=self.host,
             headers=headers,
-            timeout=httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0),
+            timeout=httpx.Timeout(connect=10.0, read=600.0, write=60.0,
+                                  pool=10.0),
         )
+        log.debug("Ollama client initialized with host: %s", self.host) 
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -43,6 +45,8 @@ class OllamaClient:
         Returns a dict with reachable/models on success; raises OllamaUnavailable otherwise.
         """
         try:
+            log.debug("Checking Ollama health at %s", self.host)
+            
             r = await self._client.get("/api/tags")
             r.raise_for_status()
         except httpx.HTTPError as e:

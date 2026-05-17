@@ -6,6 +6,6 @@ GitHub OAuth slots in beside it by registering a new builder.
 
 from . import endpoints
 from .auth import get_workstation_auth
-from .client import HubClient
+from .client import Exemplar, HubClient
 
-__all__ = ["HubClient", "endpoints", "get_workstation_auth"]
+__all__ = ["Exemplar", "HubClient", "endpoints", "get_workstation_auth"]

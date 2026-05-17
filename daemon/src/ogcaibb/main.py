@@ -22,9 +22,9 @@ from . import __version__ as DAEMON_VERSION
 from .agents.registry import AgentRegistry
 from .commands.parser import parse_slash_command
 from .config import settings
-from .hub_client import endpoints as hub_endpoints
+from .hub_client import HubClient, endpoints as hub_endpoints
 from .hub_client.auth import get_workstation_auth
-from .loop import LoopResult, _build_menu, run_turn, run_turn_stream
+from .loop import LoopResult, _build_menu, format_exemplars, run_turn, run_turn_stream
 from .ollama_client import OllamaUnavailable, get_client
 from .skills.registry import SkillRegistry
 from .tools import registry as tool_registry
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
     app.state.redactor = None
     app.state.uploader = None
     app.state.signal_observer = None
+    app.state.hub_client = None
     if settings.trace_enabled:
         try:
             app.state.workstation_id = load_workstation_id(settings.workstation_id_path)
@@ -105,6 +106,26 @@ async def lifespan(app: FastAPI):
             )
             app.state.uploader.start()
 
+            # Reuse the same auth + hub URL for the retrieval client, when enabled.
+            if settings.retrieve_enabled and settings.hub_url and settings.hub_token:
+                hub_auth = get_workstation_auth(
+                    settings.hub_auth, token=settings.hub_token
+                )
+                app.state.hub_client = HubClient(
+                    hub_url=settings.hub_url,
+                    auth=hub_auth,
+                    timeout=settings.retrieve_timeout,
+                )
+                log.info(
+                    "retrieval enabled (hub=%s top_k=%d scope=%s)",
+                    settings.hub_url, settings.retrieve_top_k, settings.retrieve_scope,
+                )
+            elif settings.retrieve_enabled:
+                log.warning(
+                    "OGCAIBB_RETRIEVE_ENABLED=1 but OGCAIBB_HUB_URL/HUB_TOKEN "
+                    "are not set; retrieval will be skipped per turn."
+                )
+
             detectors = _build_signal_detectors()
             if detectors:
                 app.state.signal_observer = SignalObserver(
@@ -136,6 +157,8 @@ async def lifespan(app: FastAPI):
             await app.state.uploader.stop()
         if app.state.wal is not None:
             app.state.wal.close()
+        if app.state.hub_client is not None:
+            await app.state.hub_client.aclose()
         await client.aclose()
 
 
@@ -236,6 +259,13 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             commands_dir=request.app.state.commands_dir,
         )
 
+    exemplars_text = await _maybe_retrieve_exemplars(
+        request.app,
+        messages,
+        agent_name=agent_name,
+        skill_name=skill_name,
+    )
+
     if req.stream:
         async def event_stream():
             role_sent = False
@@ -268,6 +298,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     system_prompt=system_prompt,
                     allowed_tools=allowed_tools,
                     menu=menu,
+                    exemplars=exemplars_text,
                 ):
                     if await request.is_disconnected():
                         log.info("client disconnected mid-stream; aborting")
@@ -334,6 +365,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             system_prompt=system_prompt,
             allowed_tools=allowed_tools,
             menu=menu,
+            exemplars=exemplars_text,
         )
     except OllamaUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
@@ -365,6 +397,70 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         },
     }
     return JSONResponse(completion)
+
+
+async def _maybe_retrieve_exemplars(
+    app: FastAPI,
+    messages: list[dict[str, Any]],
+    *,
+    agent_name: str | None,
+    skill_name: str | None,
+) -> str | None:
+    """Call the hub's /v1/retrieve for the latest user message.
+
+    Best-effort: any failure (no client configured, network error, hub 5xx)
+    returns None so the turn proceeds without exemplars instead of erroring.
+    """
+    hub: HubClient | None = getattr(app.state, "hub_client", None)
+    if hub is None or not settings.retrieve_enabled:
+        return None
+    query = _latest_user_message_text(messages)
+    if not query.strip():
+        return None
+    try:
+        exemplars = await hub.retrieve(
+            query=query,
+            top_k=settings.retrieve_top_k,
+            min_score=settings.retrieve_min_score,
+            agent=agent_name,
+            skill=skill_name,
+            scope=settings.retrieve_scope,
+        )
+    except Exception as e:
+        log.warning("retrieve: %s", e)
+        return None
+    if not exemplars:
+        return None
+    return format_exemplars(
+        [
+            {
+                "trace_id": e.trace_id,
+                "score": e.score,
+                "user_message": e.user_message,
+                "assistant_text": e.assistant_text,
+                "agent": e.agent,
+                "skill": e.skill,
+                "model": e.model,
+            }
+            for e in exemplars
+        ]
+    )
+
+
+def _latest_user_message_text(messages: list[dict[str, Any]]) -> str:
+    for msg in reversed(messages):
+        if (msg.get("role") or "").lower() != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                p.get("text", "") if isinstance(p, dict) else str(p)
+                for p in content
+                if (isinstance(p, dict) and isinstance(p.get("text"), str)) or isinstance(p, str)
+            )
+    return ""
 
 
 def _build_signal_detectors() -> list[Any]:

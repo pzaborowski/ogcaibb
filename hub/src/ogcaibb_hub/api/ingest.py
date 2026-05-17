@@ -29,9 +29,64 @@ from .. import endpoints
 from ..auth.base import Identity
 from ..config import settings
 from ..storage.base import IngestSummary, SignalRow, TraceRow
+from ..storage.vectors import VectorRow
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _extract_last_user_message(payload: dict[str, Any]) -> str:
+    """Return the latest user-role message content as a flat string, or ''.
+
+    Tolerates both str content and OpenAI-style list-of-parts.
+    """
+    messages = payload.get("messages_in") or []
+    for msg in reversed(messages):
+        if (msg.get("role") or "").lower() != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for p in content:
+                if isinstance(p, dict) and isinstance(p.get("text"), str):
+                    parts.append(p["text"])
+                elif isinstance(p, str):
+                    parts.append(p)
+            if parts:
+                return "\n".join(parts)
+    return ""
+
+
+async def _index_into_vectors(
+    *,
+    embedder: Any,
+    vector_store: Any,
+    payload: dict[str, Any],
+    received_at: float,
+    workstation_id: str,
+) -> None:
+    """Embed the trace's last user message and upsert into the vector store."""
+    text = _extract_last_user_message(payload).strip()
+    if not text:
+        return  # nothing to index (e.g. tool-only turn)
+    vectors = await embedder.embed([text])
+    if not vectors:
+        return
+    assistant_text = str(payload.get("assistant_text") or "")
+    row = VectorRow(
+        trace_id=str(payload["trace_id"]),
+        workstation_id=str(payload.get("workstation_id", workstation_id)),
+        vector=vectors[0],
+        user_message=text[:4000],
+        assistant_text=assistant_text[:4000],
+        agent=payload.get("agent"),
+        skill=payload.get("skill"),
+        model=str(payload.get("model", "")),
+        received_at=received_at,
+    )
+    await vector_store.upsert(row=row)
 
 
 def _iso_to_epoch(value: Any) -> float | None:
@@ -86,6 +141,8 @@ async def ingest(
     received_at = time.time()
     trace_store = request.app.state.trace_store
     index_store = request.app.state.index_store
+    vector_store = getattr(request.app.state, "vector_store", None)
+    embedder = getattr(request.app.state, "embedder", None)
 
     # Persist the raw chunk first — cheap, fits the "store-then-index" pattern
     # and means we can re-index later without re-uploading.
@@ -124,6 +181,20 @@ async def ingest(
             new = await index_store.upsert_trace(row=row)
             if new:
                 summary.accepted += 1
+                if vector_store is not None and embedder is not None:
+                    try:
+                        await _index_into_vectors(
+                            embedder=embedder,
+                            vector_store=vector_store,
+                            payload=payload,
+                            received_at=received_at,
+                            workstation_id=x_workstation_id,
+                        )
+                    except Exception as e:
+                        log.warning(
+                            "indexer: failed to embed trace %s: %s",
+                            row.trace_id[:8], e,
+                        )
             else:
                 summary.duplicates += 1
         elif kind == "signal":

@@ -34,6 +34,29 @@ class HubSettings(BaseSettings):
         alias="OGCAIBB_HUB_INDEX_STORE_PATH",
     )
 
+    # --- Retrieval (embedder + vector store) ---------------------------
+    embedder: str | None = Field(default=None, alias="OGCAIBB_HUB_EMBEDDER")
+    embedder_host: str = Field(
+        default="http://localhost:11434", alias="OGCAIBB_HUB_EMBEDDER_HOST"
+    )
+    embedder_model: str = Field(
+        default="nomic-embed-text", alias="OGCAIBB_HUB_EMBEDDER_MODEL"
+    )
+    embedder_api_key: str | None = Field(
+        default=None, alias="OGCAIBB_HUB_EMBEDDER_API_KEY"
+    )
+
+    vector_store: str | None = Field(default=None, alias="OGCAIBB_HUB_VECTOR_STORE")
+    vector_store_url: str = Field(
+        default="http://localhost:6333", alias="OGCAIBB_HUB_VECTOR_STORE_URL"
+    )
+    vector_store_collection: str = Field(
+        default="ogcaibb-traces", alias="OGCAIBB_HUB_VECTOR_STORE_COLLECTION"
+    )
+    vector_store_api_key: str | None = Field(
+        default=None, alias="OGCAIBB_HUB_VECTOR_STORE_API_KEY"
+    )
+
     # --- Limits ---------------------------------------------------------
     max_chunk_bytes: int = Field(
         default=16 * 1024 * 1024, alias="OGCAIBB_HUB_MAX_CHUNK_BYTES"

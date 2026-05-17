@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     hub_auth: str = Field(default="apikey", alias="OGCAIBB_HUB_AUTH")
     hub_token: str | None = Field(default=None, alias="OGCAIBB_HUB_TOKEN")
 
+    # --- Retrieval (pre-turn exemplar injection) ----------------------
+    retrieve_enabled: bool = Field(default=False, alias="OGCAIBB_RETRIEVE_ENABLED")
+    retrieve_top_k: int = Field(default=3, alias="OGCAIBB_RETRIEVE_TOP_K")
+    retrieve_min_score: float = Field(default=0.5, alias="OGCAIBB_RETRIEVE_MIN_SCORE")
+    # scope: self | all
+    retrieve_scope: str = Field(default="all", alias="OGCAIBB_RETRIEVE_SCOPE")
+    # max seconds to wait for the hub; on timeout we proceed without exemplars.
+    retrieve_timeout: float = Field(default=2.0, alias="OGCAIBB_RETRIEVE_TIMEOUT")
+
     @property
     def num_ctx(self) -> int:
         return 32768

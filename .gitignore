@@ -17,3 +17,4 @@ chroma_db/
 qdrant_storage/
 .coverage
 htmlcov/
+.claude/settings.local.json

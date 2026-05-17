@@ -15,11 +15,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from . import endpoints
-from .api import health, ingest
+from .api import health, ingest, retrieve
 from .auth.base import HubAuth
 from .auth.registry import get_hub_auth
 from .config import settings
+from .embedder.registry import get_embedder
 from .storage.registry import get_index_store, get_trace_store
+from .storage.vectors.registry import get_vector_store
 
 log = logging.getLogger("ogcaibb_hub")
 
@@ -39,6 +41,41 @@ async def lifespan(app: FastAPI):
         settings.index_store, db_path=settings.index_store_path
     )
 
+    # Optional: embedder + vector store enable the retrieval loop. Either
+    # both are configured or neither — partial configuration logs a warning
+    # and disables retrieval.
+    app.state.embedder = None
+    app.state.vector_store = None
+    if settings.embedder and settings.vector_store:
+        try:
+            app.state.embedder = get_embedder(
+                settings.embedder,
+                host=settings.embedder_host,
+                model=settings.embedder_model,
+                api_key=settings.embedder_api_key,
+            )
+            app.state.vector_store = get_vector_store(
+                settings.vector_store,
+                url=settings.vector_store_url,
+                collection=settings.vector_store_collection,
+                api_key=settings.vector_store_api_key,
+            )
+            log.info(
+                "retrieval enabled: embedder=%s(%s) vector_store=%s",
+                settings.embedder, settings.embedder_model,
+                settings.vector_store,
+            )
+        except Exception as e:
+            log.error("retrieval init failed (%s) — disabling", e)
+            app.state.embedder = None
+            app.state.vector_store = None
+    elif settings.embedder or settings.vector_store:
+        log.warning(
+            "retrieval partial config (embedder=%s vector_store=%s) — "
+            "set both or neither",
+            settings.embedder, settings.vector_store,
+        )
+
     log.info(
         "auth=%s trace_store=%s(%s) index_store=%s(%s)",
         settings.auth,
@@ -49,6 +86,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if app.state.vector_store is not None:
+            await app.state.vector_store.aclose()
+        if app.state.embedder is not None:
+            await app.state.embedder.aclose()
         await app.state.index_store.close()
 
 
@@ -70,6 +111,7 @@ async def auth_middleware(request: Request, call_next):
 
 app.include_router(health.router)
 app.include_router(ingest.router)
+app.include_router(retrieve.router)
 
 
 def run() -> None:

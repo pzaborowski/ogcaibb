@@ -100,12 +100,13 @@ async def run_turn(
     system_prompt: str | None = None,
     allowed_tools: list[str] | None = None,
     menu: str | None = None,
+    exemplars: str | None = None,
 ) -> LoopResult:
     if not messages:
         raise ValueError("messages must be non-empty")
 
     model_name = model or settings.model_chat
-    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu)
+    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu, exemplars=exemplars)
 
     user_text = messages[-1].get("content", "")
     history = messages[:-1]
@@ -147,8 +148,10 @@ async def run_turn(
 
 _CRITICAL_RULES_MARKER = "CRITICAL RULES (apply to every turn regardless of skill or agent):"
 _MENU_MARKER = "## Available skills, agents, and slash commands"
+_EXEMPLARS_MARKER = "## Relevant past exemplars (from the team's accepted prompts)"
 _DEFAULT_INTRO = "You are ogcaibb, a local AI assistant for OGC Building Block repositories."
 _MENU_DESC_MAXLEN = 220
+_EXEMPLAR_SNIPPET_MAXLEN = 600
 
 
 def _critical_rules() -> str:
@@ -182,18 +185,24 @@ def _critical_rules() -> str:
     )
 
 
-def _resolve_system_prompt(custom: str | None, *, menu: str | None = None) -> str:
-    """Compose the final system prompt: intro/custom + menu + critical rules.
+def _resolve_system_prompt(
+    custom: str | None,
+    *,
+    menu: str | None = None,
+    exemplars: str | None = None,
+) -> str:
+    """Compose the final system prompt.
 
     Order is deliberate:
       1. Caller-supplied prompt (agent + skill body, or the default intro)
       2. Menu of available skills/agents/commands so the model knows what's
          on offer in this workspace
-      3. CRITICAL rules — last because most chat models weight the most-recent
+      3. Relevant past exemplars retrieved from the hub
+      4. CRITICAL rules — last because most chat models weight the most-recent
          system content highest.
 
-    If `custom` already includes the critical-rules marker (e.g. a manual
-    override embedded its own), we don't re-append.
+    Idempotent on each marker — if `custom` already embeds one of them (e.g.
+    a manual override), we don't re-append it.
     """
     parts: list[str] = []
     if custom is None:
@@ -203,6 +212,8 @@ def _resolve_system_prompt(custom: str | None, *, menu: str | None = None) -> st
 
     if menu and _MENU_MARKER not in (custom or ""):
         parts.append(menu.rstrip())
+    if exemplars and _EXEMPLARS_MARKER not in (custom or ""):
+        parts.append(exemplars.rstrip())
 
     rendered = "\n\n".join(parts)
     if _CRITICAL_RULES_MARKER in rendered:
@@ -276,6 +287,45 @@ def _build_menu(
     return header + "\n\n" + "\n\n".join(sections)
 
 
+def format_exemplars(items: list[dict[str, Any]]) -> str | None:
+    """Render hub-retrieved exemplars as a system-prompt section.
+
+    `items` is the shape returned by `HubClient.retrieve`: each entry has
+    user_message, assistant_text, agent, skill, model, score. Returns None
+    when there's nothing useful to inject.
+    """
+    rows: list[str] = []
+    for i, ex in enumerate(items, 1):
+        user = (ex.get("user_message") or "").strip()
+        assistant = (ex.get("assistant_text") or "").strip()
+        if not user and not assistant:
+            continue
+        meta_bits = []
+        if ex.get("agent"):
+            meta_bits.append(f"agent={ex['agent']}")
+        if ex.get("skill"):
+            meta_bits.append(f"skill={ex['skill']}")
+        score = ex.get("score")
+        if isinstance(score, (int, float)):
+            meta_bits.append(f"score={score:.2f}")
+        header = f"### {i}. " + (" · ".join(meta_bits) or "exemplar")
+        rows.append(
+            f"{header}\n"
+            f"_User_: {_truncate(user, _EXEMPLAR_SNIPPET_MAXLEN)}\n"
+            f"_Assistant_: {_truncate(assistant, _EXEMPLAR_SNIPPET_MAXLEN)}"
+        )
+    if not rows:
+        return None
+    intro = (
+        f"{_EXEMPLARS_MARKER}\n"
+        "Drawn from past turns that were either explicitly upvoted or that "
+        "scored positive on implicit signals. Use them as guidance for "
+        "approach, tone, and prior decisions — not as ground truth, and "
+        "not as instructions to copy verbatim."
+    )
+    return intro + "\n\n" + "\n\n".join(rows)
+
+
 def _truncate(text: str, limit: int = _MENU_DESC_MAXLEN) -> str:
     text = " ".join(text.split())
     if len(text) <= limit:
@@ -320,6 +370,7 @@ async def run_turn_stream(
     system_prompt: str | None = None,
     allowed_tools: list[str] | None = None,
     menu: str | None = None,
+    exemplars: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield typed events for true token-by-token streaming.
 
@@ -338,7 +389,7 @@ async def run_turn_stream(
         raise ValueError("messages must be non-empty")
 
     model_name = model or settings.model_chat
-    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu)
+    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu, exemplars=exemplars)
     user_text = messages[-1].get("content", "")
 
     agent = _build_agent(model_name, sys_prompt, allowed_tools)

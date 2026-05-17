@@ -24,7 +24,7 @@ from .commands.parser import parse_slash_command
 from .config import settings
 from .hub_client import endpoints as hub_endpoints
 from .hub_client.auth import get_workstation_auth
-from .loop import LoopResult, run_turn, run_turn_stream
+from .loop import LoopResult, _build_menu, run_turn, run_turn_stream
 from .ollama_client import OllamaUnavailable, get_client
 from .skills.registry import SkillRegistry
 from .tools import registry as tool_registry
@@ -228,6 +228,14 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     created = int(time.time())
     model_name = req.model or settings.model_chat
 
+    menu = None
+    if settings.inject_menu:
+        menu = _build_menu(
+            skills=request.app.state.skills,
+            agents=request.app.state.agents,
+            commands_dir=request.app.state.commands_dir,
+        )
+
     if req.stream:
         async def event_stream():
             role_sent = False
@@ -259,6 +267,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     model=model_name,
                     system_prompt=system_prompt,
                     allowed_tools=allowed_tools,
+                    menu=menu,
                 ):
                     if await request.is_disconnected():
                         log.info("client disconnected mid-stream; aborting")
@@ -324,6 +333,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             model=model_name,
             system_prompt=system_prompt,
             allowed_tools=allowed_tools,
+            menu=menu,
         )
     except OllamaUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e

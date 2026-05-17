@@ -12,9 +12,15 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import frontmatter
 from pydantic_ai import Agent
+
+if TYPE_CHECKING:
+    from .agents.registry import AgentRegistry
+    from .skills.registry import SkillRegistry
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -93,12 +99,13 @@ async def run_turn(
     model: str | None = None,
     system_prompt: str | None = None,
     allowed_tools: list[str] | None = None,
+    menu: str | None = None,
 ) -> LoopResult:
     if not messages:
         raise ValueError("messages must be non-empty")
 
     model_name = model or settings.model_chat
-    sys_prompt = system_prompt or _default_system_prompt()
+    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu)
 
     user_text = messages[-1].get("content", "")
     history = messages[:-1]
@@ -138,25 +145,159 @@ async def run_turn(
     )
 
 
-def _default_system_prompt() -> str:
+_CRITICAL_RULES_MARKER = "CRITICAL RULES (apply to every turn regardless of skill or agent):"
+_MENU_MARKER = "## Available skills, agents, and slash commands"
+_DEFAULT_INTRO = "You are ogcaibb, a local AI assistant for OGC Building Block repositories."
+_MENU_DESC_MAXLEN = 220
+
+
+def _critical_rules() -> str:
+    """Invariants every turn must enforce.
+
+    These are appended to *every* system prompt — default, skill-augmented, or
+    agent-supplied — so that tool-use semantics don't silently drop when a
+    custom agent prompt takes over. The previous failure mode was small models
+    (e.g. qwen3:4b) running a single Write and pasting the rest of the files
+    as markdown code blocks; rule 3 below explicitly addresses that.
+    """
     return (
-        "You are ogcaibb, a local AI assistant for OGC Building Block repositories.\n"
-        f"Your workspace root is {settings.workspace_root}. "
-        "All file paths you create or edit must live inside this root.\n\n"
-        "CRITICAL RULES:\n"
-        "1. When the user asks you to create, write, or update files, you MUST "
-        "call the Write tool for each file. Do NOT paste file contents into "
-        "your reply as code blocks instead of writing them.\n"
-        "2. When the user asks you to edit existing files, use the Edit tool. "
-        "Use Read first if you need to see the current content.\n"
-        "3. Before writing, briefly state which files you are about to create "
-        "and their absolute paths. After all writes succeed, summarise what "
-        "you wrote — but never duplicate the file contents in your reply.\n"
-        "4. Never invent vocabulary URIs — call the WebFetch tool to look them "
-        "up on the marine-vocabulary allowlist (NERC, CF, Darwin Core, OBIS, ICES).\n"
-        "5. If a Write call fails with a permission error, the path is outside "
+        f"{_CRITICAL_RULES_MARKER}\n"
+        f"1. Your workspace root is {settings.workspace_root}. All file paths "
+        "you create or edit must live inside this root.\n"
+        "2. When asked to create or update files, you MUST call the Write tool "
+        "for EACH file. Do NOT paste file contents into your reply as code "
+        "blocks — code blocks are never persisted to disk.\n"
+        "3. Before producing your final answer, enumerate every file the user "
+        "expects (or that your plan promised) and verify each has a successful "
+        "Write call in the conversation. If any is missing, make the Write "
+        "call now; do not finish the turn with files only described in prose.\n"
+        "4. Use Edit (preceded by Read when you need current content) to "
+        "modify existing files. Do not Write over an existing file unless the "
+        "user explicitly asked for a full rewrite.\n"
+        "5. Never invent vocabulary URIs — call the WebFetch tool to look them "
+        "up on the marine-vocabulary allowlist (NERC, CF, Darwin Core, OBIS, "
+        "ICES).\n"
+        "6. If a Write call fails with a permission error, the path is outside "
         "the workspace — report this to the user, do not paste contents.\n"
     )
+
+
+def _resolve_system_prompt(custom: str | None, *, menu: str | None = None) -> str:
+    """Compose the final system prompt: intro/custom + menu + critical rules.
+
+    Order is deliberate:
+      1. Caller-supplied prompt (agent + skill body, or the default intro)
+      2. Menu of available skills/agents/commands so the model knows what's
+         on offer in this workspace
+      3. CRITICAL rules — last because most chat models weight the most-recent
+         system content highest.
+
+    If `custom` already includes the critical-rules marker (e.g. a manual
+    override embedded its own), we don't re-append.
+    """
+    parts: list[str] = []
+    if custom is None:
+        parts.append(_DEFAULT_INTRO)
+    else:
+        parts.append(custom.rstrip())
+
+    if menu and _MENU_MARKER not in (custom or ""):
+        parts.append(menu.rstrip())
+
+    rendered = "\n\n".join(parts)
+    if _CRITICAL_RULES_MARKER in rendered:
+        return rendered
+    return rendered + "\n\n" + _critical_rules()
+
+
+def _default_system_prompt() -> str:
+    """Backward-compat: the default system prompt with no menu."""
+    return _resolve_system_prompt(None)
+
+
+def _build_menu(
+    skills: "SkillRegistry | None" = None,
+    agents: "AgentRegistry | None" = None,
+    commands_dir: Path | None = None,
+) -> str | None:
+    """Render a markdown manifest of locally available skills/agents/commands.
+
+    Returned text is suitable for direct injection into the system prompt;
+    returns None when there is nothing to advertise. Descriptions are taken
+    from each item's frontmatter when present, truncated for budget.
+
+    Skills/agents are not auto-activated by mentioning them here — the model
+    still needs to either request activation (future skills-as-tools work) or
+    instruct the user to invoke a slash command. The menu's job is purely
+    discoverability so the model stops behaving as if these don't exist.
+    """
+    sections: list[str] = []
+
+    if skills is not None and len(skills) > 0:
+        rows = [
+            f"- **{s.name}** — {_truncate(s.description)}"
+            for s in sorted(skills, key=lambda s: s.name)
+            if s.description
+        ]
+        if rows:
+            sections.append("### Skills\n" + "\n".join(rows))
+
+    if agents is not None and len(agents) > 0:
+        rows = [
+            f"- **{a.name}** — {_truncate(a.description)}"
+            for a in sorted(agents, key=lambda a: a.name)
+            if a.description
+        ]
+        if rows:
+            sections.append("### Agents\n" + "\n".join(rows))
+
+    if commands_dir is not None and commands_dir.exists():
+        rows: list[str] = []
+        for md in sorted(commands_dir.glob("*.md")):
+            slash = md.stem
+            desc = _command_description(md)
+            if desc:
+                rows.append(f"- `/{slash}` — {_truncate(desc)}")
+            else:
+                rows.append(f"- `/{slash}`")
+        if rows:
+            sections.append("### Slash commands\n" + "\n".join(rows))
+
+    if not sections:
+        return None
+
+    header = (
+        f"{_MENU_MARKER}\n"
+        "These are loaded locally in this workspace. Prefer activating a "
+        "matching skill or invoking the appropriate slash command over "
+        "improvising — the wrapped logic enforces project conventions the "
+        "default prompt can't fully express."
+    )
+    return header + "\n\n" + "\n\n".join(sections)
+
+
+def _truncate(text: str, limit: int = _MENU_DESC_MAXLEN) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _command_description(path: Path) -> str:
+    """Pull a one-line description for a slash-command markdown file."""
+    try:
+        post = frontmatter.load(path)
+    except Exception:
+        return ""
+    desc = post.metadata.get("description")
+    if isinstance(desc, str) and desc.strip():
+        return desc.strip()
+    # Fall back to the first non-empty line of the body.
+    for line in post.content.splitlines():
+        if line.strip():
+            # Strip leading markdown emphasis / headings.
+            return line.strip().lstrip("#").strip().strip("*_`").strip()
+    return ""
 
 
 def _to_pydanticai_history(history: list[dict[str, Any]]):
@@ -178,6 +319,7 @@ async def run_turn_stream(
     model: str | None = None,
     system_prompt: str | None = None,
     allowed_tools: list[str] | None = None,
+    menu: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield typed events for true token-by-token streaming.
 
@@ -196,7 +338,7 @@ async def run_turn_stream(
         raise ValueError("messages must be non-empty")
 
     model_name = model or settings.model_chat
-    sys_prompt = system_prompt or _default_system_prompt()
+    sys_prompt = _resolve_system_prompt(system_prompt, menu=menu)
     user_text = messages[-1].get("content", "")
 
     agent = _build_agent(model_name, sys_prompt, allowed_tools)

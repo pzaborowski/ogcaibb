@@ -59,6 +59,11 @@ class Settings(BaseSettings):
         alias="OGCAIBB_WORKSTATION_ID_PATH",
     )
 
+    # Inject a markdown menu of locally available skills/agents/slash commands
+    # into the system prompt so the model knows what's on offer without each
+    # client having to speak the ogcaibb skill-extension protocol.
+    inject_menu: bool = Field(default=True, alias="OGCAIBB_INJECT_MENU")
+
     # Comma-separated detector names. Empty string = disabled.
     # Defaults to the cheap baseline; opt in to IO-heavy detectors per deployment.
     implicit_signals: str = Field(

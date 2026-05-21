@@ -1,0 +1,39 @@
+# Define the valid API key map before the server block
+map $http_authorization $api_key_status {
+    default 0;
+    "Bearer H74jDHf73uIhsgDbNeopSn734YOUR_SUPER_SECRET_KEY_HERE" 1; 
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ai.seadots.lumi.data.destination-earth.eu;
+
+    # SSL Certificate Paths
+    ssl_certificate /etc/letsencrypt/live/ai.seadots.lumi.data.destination-earth.eu/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ai.seadots.lumi.data.destination-earth.eu/privkey.pem;
+
+    # Optimized SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    location / {
+        if ($api_key_status = 0) {
+            return 401 '{"error": "Unauthorized: Missing or invalid Authorization Bearer token"}';
+        }
+        proxy_pass http://127.0.0.1:11434;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Fix for large model uploads/streaming timeout
+        client_max_body_size 0;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_buffering off;
+        
+    }
+}
+

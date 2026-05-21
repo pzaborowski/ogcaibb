@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../bblocks-seadots"
+		},
+		{
+			"path": "../../Iliad/iliad-apis-features"
+		},
+		{
+			"path": "../../Iliad/service-playground"
 		}
 	],
 	"settings": {}

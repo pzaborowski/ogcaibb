@@ -160,7 +160,7 @@ def _critical_rules() -> str:
     These are appended to *every* system prompt — default, skill-augmented, or
     agent-supplied — so that tool-use semantics don't silently drop when a
     custom agent prompt takes over. The previous failure mode was small models
-    (e.g. qwen3:4b) running a single Write and pasting the rest of the files
+ running a single Write and pasting the rest of the files
     as markdown code blocks; rule 3 below explicitly addresses that.
     """
     return (

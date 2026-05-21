@@ -184,6 +184,25 @@ class ChatCompletionRequest(BaseModel):
     skill: str | None = None
 
 
+def _resolve_requested_model(requested: str | None) -> str:
+    """Choose the server-configured model for an OpenAI-compatible request.
+
+    Clients still have to send a `model` field, and IDE plugins can cache old
+    values. The daemon is intentionally server-decided: accept only configured
+    role models and otherwise use the chat model.
+    """
+    configured = {settings.model_chat, settings.model_router}
+    if requested in configured:
+        return requested
+    if requested:
+        log.warning(
+            "Ignoring unconfigured client-requested model %r; using %r",
+            requested,
+            settings.model_chat,
+        )
+    return settings.model_chat
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     try:
@@ -249,7 +268,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     trace_id = uuid.uuid4().hex
     created = int(time.time())
-    model_name = req.model or settings.model_chat
+    model_name = _resolve_requested_model(req.model)
 
     menu = None
     if settings.inject_menu:

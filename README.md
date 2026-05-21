@@ -5,28 +5,23 @@ makes working on any [OGC Building Block](https://opengeospatial.github.io/bbloc
 repository feel like Claude Code — but backed by a shared on-prem Ollama
 server, with **no fallback to remote LLM providers**.
 
+Beyond the daemon, the deployment also includes an optional **hub** that
+ingests captured chat traces + feedback signals from every workstation and
+serves vector-similarity retrieval back into future prompts — closing a
+feedback loop without sending anything off-prem.
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Shared server (managed by you)                              │
-│    Ollama  ──  qwen2.5-coder:32b · nomic-embed-text          │
-│    Caddy/Traefik in front (TLS + bearer-token auth)          │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ HTTPS, Authorization: Bearer …
-┌────────────────────────▼─────────────────────────────────────┐
-│  Developer workstation                                       │
-│    Continue.dev (VS Code) ─┐                                 │
-│    aider (terminal)        │── OpenAI-compatible /v1 ──┐     │
-│                            │                          ▼     │
-│                            │       ogcaibb daemon            │
-│                            │   (FastAPI + PydanticAI)        │
-│                            │     · agents / skills /         │
-│                            │       commands / memory         │
-│                            │     · in-process tools          │
-│                            │       (Read/Write/Edit/Bash,    │
-│                            │        Docker validators,       │
-│                            │        OGC clients, embeddings) │
-└────────────────────────────┴─────────────────────────────────┘
+┌──────────────────┐         ┌──────────────────────┐         ┌────────────────────┐
+│  GPU box         │         │  Proxy + hub box     │         │  Developer machine │
+│  Ollama          │◀────────│  Caddy + ogcaibb-hub │◀────────│  ogcaibb daemon    │
+│                  │ private │  + Qdrant (opt.)     │ HTTPS   │  + Continue.dev /  │
+│                  │  VLAN   │                      │ Bearer  │  aider             │
+└──────────────────┘         └──────────────────────┘         └────────────────────┘
 ```
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full design, request lifecycle, plugin seams.
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — step-by-step setup for each component.
+- [`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md) — roadmap, architectural alternatives (incl. opencode hybrid), open questions.
 
 ## Repo layout
 
@@ -157,11 +152,29 @@ ollama pull nomic-embed-text
 
 ## Status
 
-v0.1.0 — daemon, registries, in-process tools (`Read`, `Write`, `Edit`, `Bash`,
-`WebFetch`, `BblocksPostprocess`, `Pygeoapi{Up,Down}`, `ValidateAgainstSchema`,
-`CheckContextCompleteness`, `EmbedUpsert`, `EmbedQuery`). Token-by-token SSE
-streaming with separate `reasoning_content` (chain of thought from qwen3-style
-reasoning models) and `tool_calls` deltas; client-disconnect aware.
+Wired:
 
-Not yet wired: the marine data adapters (HELCOM/EMODnet/ICES via OWSLib), the
-bblock-catalog walker, agent-to-agent delegation tool, MCP exposure.
+- Daemon, registries, in-process tools (`Read`, `Write`, `Edit`, `Bash`,
+  `WebFetch`, `BblocksPostprocess`, `Pygeoapi{Up,Down}`,
+  `ValidateAgainstSchema`, `CheckContextCompleteness`, `EmbedUpsert`,
+  `EmbedQuery`). Token-by-token SSE streaming with separate
+  `reasoning_content` and `tool_calls` deltas; client-disconnect aware.
+- Critical-rules block inherited by every agent (workspace boundary,
+  Write-tool mandate, pre-final file checklist).
+- Skill / agent / slash-command menu injected into the system prompt so
+  Continue.dev and aider see what's on offer without speaking the
+  ogcaibb extension protocol.
+- Trace capture pipeline: redactor → WAL → uploader → hub `/v1/ingest`.
+- Explicit feedback endpoint (`POST /v1/feedback`) + `ogcaibb feedback` CLI.
+- Three implicit signal detectors (`tool_call_completed_clean`,
+  `edit_retention`, `git_commit`) + observer.
+- Hub service: bearer auth, raw chunk + SQLite index storage,
+  Ollama-backed embedder, in-memory + Qdrant vector stores.
+- Retrieval loop: hub `/v1/retrieve` + workstation pre-turn exemplar
+  injection into the system prompt.
+
+Not yet wired: marine data adapters (HELCOM/EMODnet/ICES via OWSLib),
+`bblock-catalog` walker, agent-to-agent delegation, `reprompt_correction`
+detector, polarity-aware retrieval ranking, GitHub OAuth for the hub,
+hub `/v1/distill` cron, MCP server exposure, LoRA fine-tuning loop.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the roadmap.

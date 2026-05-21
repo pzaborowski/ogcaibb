@@ -1,0 +1,1 @@
+ogcaibb % scp -r -i ~/keys/destine-ssh.pem eouser@ai.seadots.lumi.data.destination-earth.eu:/home/eouser/ogcaibb/remote_ollama ./

@@ -47,7 +47,7 @@ def test_none_returns_default():
 
 
 def test_rules_mention_no_paste_and_checklist():
-    """Regression guard for the qwen3:4b paste-in-markdown failure."""
+    """Regression guard for the model paste-in-markdown failure."""
     rules = _critical_rules()
     # Must explicitly forbid pasting file contents as code blocks.
     assert "MUST call the Write tool" in rules

@@ -228,13 +228,13 @@ Cache is invalidated either by `refresh=true` or when the source register's `eta
 ### "what ontologies are imported?"
 
 ```text
-Step 1 — local: 1 ontology block found  (ogc.hosted.iliad.api.features.oim-variables)
+Step 1 — local: 1 ontology block found  (ogc.hosted.seadots.api.features.oim-variables)
 Step 2 — imports: 7 registers fetched
 Step 3 — classify: 9 ontology blocks across all sources
 Step 4 — table:
 
 Source                                  ID                                        Name
-local                                   ogc.hosted.iliad.api.features.oim-variables    OIM Variables
+local                                   ogc.hosted.seadots.api.features.oim-variables    OIM Variables
 imported (bblocks-seadots)              ogc.hosted.seadots.ontology                     Property relationship ontology
 imported (bblocks-seadots)              ogc.hosted.seadots.properties                   Seadots Properties
 imported (cross-domain-model)           ogc.cross-domain.cross-domain-model             …
@@ -277,7 +277,7 @@ imported (bblocks-stac)                 ogc.stac.collection
 ```text
 Forward dependencies of ogc.hosted.iliad.api.features.ses-impact-assessment:
   ogc.hosted.seadots.odd-protocol             (seadots, after the recent move)
-  ogc.hosted.iliad.api.features.oim-variables (local)
+  ogc.hosted.seadots.api.features.oim-variables (local)
   ogc.hosted.iliad.api.features.indicator-quality-requirement (local)
   ogc.hosted.iliad.api.features.property-relationship         (local)
 

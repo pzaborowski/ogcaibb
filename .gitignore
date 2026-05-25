@@ -18,3 +18,4 @@ qdrant_storage/
 .coverage
 htmlcov/
 .claude/settings.local.json
+.claude/settings.local.json

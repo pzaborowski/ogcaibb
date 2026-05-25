@@ -1,6 +1,6 @@
 ---
 name: data-usability-checkin-agent
-description: Use this agent when a user wants to assess a source dataset for usability against SeaDOTs-style criteria, select or confirm a target set of building blocks, walk through the iliad-apis-features check-in process, and generate a staged package of three related building blocks a source-data block with representative examples, a target-model block selected from repo/imported matches, and a metadata/catalog block linking both modes with OGC Records and relevant STAC extensions. Not for generic metadata generation without usability assessment or for non-check-in tasks.
+description: Use this agent when a user wants to assess a source dataset for usability against SeaDOTs-style criteria, select or confirm a target set of building blocks, walk through the iliad-apis-features check-in process, and generate a staged package of three related building blocks: a source-data block with representative examples, a target-model block selected from repo/imported matches, and a metadata/catalog block linking both modes with OGC Records and relevant STAC extensions. Not for generic metadata generation without usability assessment or for non-check-in tasks.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: sonnet
 ---
@@ -54,7 +54,7 @@ For each criterion record: short rationale, confidence, evidence, open gap.
 
 If the user does not provide a reference set:
 
-1. Propose repository defaults first: STAC-aligned source/asset blocks, OGC API Records / GeoDCAT discovery blocks, domain-specific OIM / observation / feature blocks already in `_sources/`.
+1. Propose repository defaults first: STAC-aligned source/asset blocks, OGC API Records / GeoDCAT discovery blocks, domain-specific OIM / observation / feature blocks already in `_sources/` and imported blocks in bblocks-config.yaml
 2. Search imported repositories declared in `bblocks-config.yaml`. Use the `bblock-register-resolution` skill to resolve published URLs to machine-readable register endpoints.
 3. Rank candidate target blocks via the `bblock-relevance` skill (call it with the dataset's example file + documentation + any service endpoint). The skill returns top-k per group (schema vs. schemaless × data vs. metadata) over six weighted dimensions: type, properties, model, vocabulary, themes/keywords, embeddings. Use the `schema/data` group for BB1, `schemaless/data` (model/ontology/vocabulary) for BB2, and `schema/metadata` for BB3. Quote the ranking table in the BB-selection rationale.
 4. Ask the user to confirm BB2 only when the tradeoff is material.
@@ -74,11 +74,18 @@ Verify the contract before reporting check-in as complete. If any rule fails, lo
 
 ## Workflow
 
-### Step 1 — Source intake and profiling
+### Step 0 — Source intake and profiling
+
+Using current prompt, collect information about the data source for its relevance.
 
 Delegate to `metadata-dispatcher` to detect format, extract schema/properties/dimensions, and infer spatial/temporal extent. It will route to the right skill (`metadata-extraction`, `csv-to-metadata`, `netcdf-to-stac`).
 
 Capture: full property list, geometry, encoding, sample records that will become BB1 examples. The full property list is the input to the contract above.
+
+### Step 1 - source original data from the endpoint
+
+If the endpoint was provided or definition of the dataset, try to collect real data relevant for user prompt. Store example data with full provenance including APIs calls.
+Baed on this create the script that can reproduce data aquisition with the same examples on output.
 
 ### Step 2 — Usability assessment
 

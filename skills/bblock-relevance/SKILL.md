@@ -207,7 +207,7 @@ schemaless / data
 ─────────────────────────────────────────────────────────────────────────────────────────
 ID                                                       Source      Overall   type props model vocab themes embed
 ogc.hosted.seadots.ontology                              imported    0.41      0.40  —     —     0.62  0.51  0.53
-ogc.hosted.iliad.api.features.oim-variables              local       0.40      0.40  —     —     0.71  0.49  0.51
+ogc.hosted.seadots.api.features.oim-variables              local       0.40      0.40  —     —     0.71  0.49  0.51
 
 schemaless / metadata
 ─────────────────────────────────────────────────────────────────────────────────────────

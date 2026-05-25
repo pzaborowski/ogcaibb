@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ogcaibb.agents.registry import AgentRegistry
+from ogcaibb.config import settings
 from ogcaibb.loop import (
     _CRITICAL_RULES_MARKER,
     _MENU_MARKER,
@@ -19,6 +20,7 @@ from ogcaibb.loop import (
     _resolve_system_prompt,
 )
 from ogcaibb.skills.registry import SkillRegistry
+from ogcaibb.main import _resolve_requested_model
 
 
 def test_default_prompt_contains_critical_rules():
@@ -148,3 +150,11 @@ def test_resolve_system_prompt_with_no_menu_unchanged():
     base = _resolve_system_prompt("AGENT BODY")
     with_none = _resolve_system_prompt("AGENT BODY", menu=None)
     assert base == with_none
+
+
+def test_unconfigured_client_model_falls_back_to_chat_model():
+    assert _resolve_requested_model("qwen3:4b") == settings.model_chat
+
+
+def test_configured_client_model_is_allowed():
+    assert _resolve_requested_model(settings.model_router) == settings.model_router

@@ -15,6 +15,7 @@ Be the one place that answers "what's in this repo and what's imported" — for 
 1. **Inventories** every locally hosted bblock (under `_sources/`).
 2. **Resolves** every register URL listed in `bblocks-config.yaml` `imports:` and pulls its `register.json`.
 3. **Classifies** each block (local + imported) into useful categories — vector, gridded, ontology, metadata, model, vocabulary, profile — and answers natural-language questions over the result.
+4. **Audits dependencies** when asked: compares local `dependsOn` declarations to schema refs, context refs, and transform contracts, and detects local dependency cycles.
 
 ## Activation
 
@@ -48,6 +49,8 @@ A free-text question OR one or more structured filters:
 | `depends_on` | bblock identifier — returns the set of blocks depending on it |
 | `include_embeddings` | `false` (default) / `true` — when true, call the `embedding-store` skill to attach embedding coordinates per matched block |
 | `embeddings_backend` | optional backend name (e.g. `local-chroma`, `qdrant`, `pinecone`, `openai`, `precomputed`) overriding the `default` declared in `.claude/embedding-store.yaml` |
+| `audit_dependencies` | `false` (default) / `true` — compare `dependsOn` with schema/context/transform relationships and detect local cycles |
+| `id_prefix` | optional local id prefix, used to decide which dependency edges are local and therefore cycle-checked |
 
 ## Process
 
@@ -75,6 +78,15 @@ For each local block also probe what other files exist alongside `bblock.json`:
 | `rules.shacl` | SHACL constraints |
 | `examples/` | has examples |
 | `tests/` | has test suite |
+
+When `audit_dependencies=true`, also collect machine-readable relationships:
+
+| Artifact | Relationship source |
+|---|---|
+| `schema.yaml` / `schema.json` | every `$ref` that points to a bblock annotated schema |
+| `context.jsonld` | context URLs that point to another bblock context |
+| `transforms.yaml` / `transforms/` metadata | source and target bblock ids when declared |
+| `examples.yaml` | required profile examples when a local pattern declares them explicitly |
 
 ### Phase 2 — import resolution
 
@@ -136,6 +148,12 @@ For the active query:
 4. **Dependency query** (`depends_on=`) — return both directions:
    - *forward*: the block's `dependsOn` list (fully resolved to register entries).
    - *reverse*: every block in the local + imported registers that lists this id under `dependsOn`.
+5. **Dependency audit** (`audit_dependencies=true`) — return:
+   - missing dependencies: schema/context/transform relationships not present in `dependsOn`
+   - stale dependencies: `dependsOn` entries not supported by any current machine-readable artifact
+   - unresolved dependencies: identifiers missing from local/imported registers
+   - local cycles: dependency cycles among local blocks only
+   - upstream cycles: imported-register cycles as warnings, not local blockers
 
 ### Output formats
 
@@ -211,6 +229,24 @@ ogc.hosted.seadots.equation-property-relationship
   has         schema.yaml, context.jsonld, examples/ (2), description.md
   ldContext   context.jsonld
 ```
+
+**Dependency audit output** (when `audit_dependencies=true`):
+
+```
+Dependency audit
+  missing dependsOn
+    ogc.hosted.example.catalog-output -> ogc.contrib.stac.extensions.cf
+      evidence: schema.yaml allOf[1].$ref
+  stale dependsOn
+    ogc.hosted.example.catalog-workflow -> ogc.hosted.example.catalog-application
+      evidence: no schema/context/transform/profile relationship found
+  local cycles
+    none
+  unresolved
+    none
+```
+
+Treat missing dependencies, unresolved dependencies, and local cycles as blocking. Treat stale dependencies as blocking unless the block documents a deliberate non-schema profile relationship.
 
 ## Output sources
 

@@ -33,6 +33,8 @@ Before drafting any new building block, **invoke the `bblock-catalog` skill firs
   - Add constraints and validations
   - Support geometry validation (Point, LineString, Polygon, etc.)
   - Include reference to JSON-FG or GeoJSON specifications
+  - Prefer schema composition over copied inline declarations: when a target shape is already defined by a local or imported building block, reference that schema with `allOf`/`$ref` and add only the local profile constraints inline
+  - Use real, resolvable schema URLs for imported schemas; for local repository dependencies, use the fully qualified block identifier in `dependsOn` and a resolvable annotated schema URL when the schema needs to be consumed outside the local build
 
 - **Model Block Generation**: Create RDF-first Building Blocks when the BB is a semantic model:
   - Set `itemClass` to `model` in `bblock.json`
@@ -47,6 +49,9 @@ Before drafting any new building block, **invoke the `bblock-catalog` skill firs
   - Vocabulary priority for environmental data: NERC > CF > Darwin Core > OBIS > ICES > EMODnet > FAO > OGC/ISO > W3C > schema.org
   - Validate semantic mappings against ontologies
   - Document provenance and sources
+  - Mirror schema composition in the context: every inherited schema `$ref` that has a published `context.jsonld` should appear in this block's `@context` array before the local term object
+  - Keep the local context object limited to terms introduced by this block's inline schema, examples, or local profile constraints; do not copy a large generic context into every block
+  - When an inherited schema has no usable context, document the fallback and map only the inherited terms that actually appear in examples or local constraints
 
 - **Example Data Management**:
   - Convert sample datasets to required formats (GeoJSON, JSON-FG, GeoParquet)
@@ -77,6 +82,8 @@ Before drafting any new building block, **invoke the `bblock-catalog` skill firs
   - If transformer or description metadata stores a target building block id, normalize it to the fully qualified identifier before writing files
   - For schema-block `context.jsonld`, only emit term definitions for actual output/schema property names, use conservative JSON-LD keys (`@id`, `@type`, `@container`, `@vocab`), and avoid unsupported keys such as `@label`
   - Avoid raw source-column labels with spaces, brackets, or punctuation as JSON-LD term names unless they are explicitly required and known to validate
+  - Build `dependsOn` from the actual graph: every schema `$ref`, context reference to another bblock context, transformer target/source, and required example profile relationship must be represented; remove stale dependencies that no current artifact uses
+  - Before handing off, verify `dependsOn` is acyclic for local blocks. If a conceptual relationship would create a cycle, represent it as a link in the example or description instead of a validator-facing `dependsOn`
 
 - **Validation & Compliance Checking**:
   - Run Docker-based OGC Building Blocks postprocessor
@@ -93,6 +100,8 @@ Before drafting any new building block, **invoke the `bblock-catalog` skill firs
   - Generate proper dependsOn arrays in bblock.json
   - Validate that dependencies are resolvable
   - When given a published dependency/import site URL, resolve it to a machine-readable register URL using `bblock-register-resolution`
+  - Treat schema/context composition as the source of truth for dependencies: do not add a dependency merely because a block is mentioned in prose, and do not omit a dependency when a `$ref`, context import, or transformer contract requires it
+  - Check the dependency graph in both directions with `bblock-catalog`: forward dependencies should resolve, reverse dependencies should not reveal unintended cycles
 
 ## Workflow
 
@@ -136,23 +145,34 @@ Before drafting any new building block, **invoke the `bblock-catalog` skill firs
      - omit string-valued `examples` metadata that points at `examples.yaml`
      - qualify all local dependency identifiers and `bblocks://` references
      - keep JSON-LD contexts minimal and schema-facing
+     - prefer `$ref`/`allOf` to copied schema fragments
+     - mirror each inherited schema context in `context.jsonld`
+     - derive `dependsOn` from actual schema refs, context refs, and transform contracts
 
-7. **Verify Property-Coverage Contract**:
+7. **Verify Composition And Dependency Contract**:
+   - Apply the rules in "Quality Contract: Schema, Context, Dependencies, and Examples" before validation
+   - For schema blocks, list every inherited schema `$ref` and confirm a matching inherited context is referenced where available
+   - Confirm local inline schema properties have local context mappings, while inherited properties are covered by referenced inherited contexts
+   - Confirm every `dependsOn` item corresponds to a real schema/context/transform/example-profile relationship
+   - Confirm local `dependsOn` edges are acyclic
+
+8. **Verify Property-Coverage Contract**:
    - Apply the four rules in "Quality Contract: Property Coverage" before validation
    - For schema blocks: diff example keys against `context.jsonld` terms and close gaps
    - For source-data blocks: confirm examples are real-source samples and provenance URLs are recorded
    - For target-model blocks: confirm full coverage of the consumed source schema, or list gaps in `description.md`
    - For blocks shipping transforms: confirm every source property is consumed or listed under `excluded:` in `transforms.yaml`, and that the local transform test asserts this
 
-8. **Validate & Test**:
+9. **Validate & Test**:
    - Run Docker container validation
    - Check schema compliance for schema blocks
    - Check ontology and SHACL compliance for model blocks
    - Verify examples against the correct validation artifacts
    - Validate context mappings only when a schema block includes `context.jsonld`
    - Execute tests
+   - When a block uses remote or imported `$ref`s, explicitly validate each example against the local source schema with all references resolved; do not rely only on a filtered postprocess report
 
-9. **Report & Document**:
+10. **Report & Document**:
    - Provide validation summary
    - List any warnings or gaps
    - Generate documentation
@@ -220,6 +240,40 @@ Every building block you author MUST satisfy these four rules before validation.
 
 When delegated by `data-usability-checkin-agent` for a BB1/BB2/BB3 triple, also satisfy that agent's "Cross-Block Property-Coverage Contract", which restates these rules over the three coordinated blocks.
 
+## Quality Contract: Schema, Context, Dependencies, And Examples
+
+Every schema building block you author or update MUST also satisfy these structural rules. Treat them as blocking checks, not cleanup suggestions.
+
+1. **Reference existing schemas by default**
+   - If a property group, feature shape, STAC item, OGC Record, PROV entity, OIM observation, or other profile is already defined in a local or imported block, use `$ref`/`allOf` rather than copying the sub-schema inline.
+   - Inline only the profile-specific constraints introduced by the current block: `const`, narrowed enums, required local properties, local extension properties, and local descriptions.
+   - Use resolvable HTTP(S) schema URLs for imported blocks. Avoid private filesystem paths or non-resolvable shorthand in schema `$ref`s.
+
+2. **Context mirrors schema inheritance**
+   - For each inherited schema `$ref`, look for the corresponding published `context.jsonld` and include it in this block's `@context` array before the local context object.
+   - The local context object maps only local inline terms and example terms that are not supplied by inherited contexts.
+   - Do not duplicate inherited terms locally unless the inherited context is missing, empty, or wrong; document that exception in `description.md`.
+
+3. **`dependsOn` reflects real machine-readable relationships**
+   - Add a dependency for every referenced bblock schema, inherited context from another bblock, transformer source/target contract, or required profile relationship.
+   - Remove stale dependencies that are only historical or prose-only.
+   - Use fully qualified bblock identifiers. Do not use folder names, aliases, or partial ids.
+
+4. **Dependencies are acyclic**
+   - Build a local dependency graph from `bblock.json` `dependsOn` arrays before handing off.
+   - If adding a dependency would create a cycle, do not add it. Move the relationship to a non-validator-facing example link, documentation note, or `links[]` entry unless the user explicitly chooses a larger model refactor.
+   - Imported upstream cycles may be reported by the postprocessor; distinguish those from cycles introduced by the local block set.
+
+5. **Examples match the local schema, not just the intention**
+   - Validate every example listed in `examples.yaml` against the block's local `schema.yaml`/`schema.json` with all `$ref`s resolved.
+   - For OGC Records and STAC examples, remember that `links[].href` often requires URI/IRI format while profile properties may allow relative `uri-reference`; use the correct form for the field being validated.
+   - Keep portable relative paths where schemas allow `uri-reference` (for example STAC asset `href`s or profile link properties), and use resolvable URI-form links where inherited schemas require URI/IRI.
+
+6. **Context matches schema and examples**
+   - Check the union of inline schema properties, inherited schema properties used by examples, and actual example keys against the effective context stack.
+   - Flag missing mappings as blocking, ambiguous mappings as blocking, and unused local context terms as cleanup warnings.
+   - Prefer context references to relevant inherited context files over re-declaring their terms locally.
+
 ## Output Structure
 
 ```
@@ -262,10 +316,11 @@ _sources/block-name/
 1. **Structure Validation**: Check all required files present, naming conventions, JSON/YAML syntax
 2. **Type Detection**: Confirm whether the BB should be generated as `itemClass: "schema"` or `itemClass: "model"`
 3. **Schema / Model Validation**: Check JSON Schema structure for schema blocks, or ontology/SHACL structure for model blocks
-4. **Context Validation**: Check `context.jsonld` only for schema blocks
-5. **Metadata Validation**: Check `bblock.json` completeness, status enum, dependency resolution, and type-specific fields
-6. **Example Validation**: Load and parse examples, validate against schema or SHACL, and check geometry types only where relevant
-7. **Container-Based Validation**: Run `ghcr.io/opengeospatial/bblocks-postprocess`, generate build artifacts
+4. **Schema Composition Validation**: Confirm inherited shapes are referenced with `$ref`/`allOf` and only local constraints are inline
+5. **Context Validation**: Check `context.jsonld` only for schema blocks; confirm inherited contexts mirror inherited schema refs and local terms cover inline properties
+6. **Metadata Validation**: Check `bblock.json` completeness, status enum, dependency resolution, type-specific fields, and acyclic local `dependsOn`
+7. **Example Validation**: Load and parse examples, validate against the local schema with resolved refs or SHACL, and check geometry types only where relevant
+8. **Container-Based Validation**: Run `ghcr.io/opengeospatial/bblocks-postprocess`, generate build artifacts
 
 ## Known Pitfalls To Avoid
 
@@ -273,6 +328,9 @@ _sources/block-name/
 - Do not emit local-artifact pointers in `bblock.json` when the postprocessor already auto-discovers the same file.
 - Do not generate JSON-LD contexts from raw CSV header labels unless those terms are transformed into safe schema-facing names first.
 - Do not add non-JSON-LD term-definition keys just for display convenience.
+- Do not copy large inherited schema fragments into a profile block when a resolvable `$ref` is available.
+- Do not copy one giant catch-all context into every related block; contexts should compose the inherited context URLs plus the local terms.
+- Do not trust `build-local/tests/report.json` alone when it reports zero tests for a filtered run; explicitly validate each example against its local schema when remote `$ref`s are involved.
 
 ## Dependencies & Related Agents
 

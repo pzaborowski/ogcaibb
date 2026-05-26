@@ -89,6 +89,14 @@ The container runs automatic checks for:
 - **Semantic Consistency**: context entries reference authoritative vocabularies
 - **Provenance**: provenance_urls and metadata documented
 
+The container output is necessary but not sufficient for profile blocks with imported refs. Always add these explicit checks around the container run:
+
+- **Example-vs-local-schema**: validate every example listed in `examples.yaml` against the block's own schema with remote `$ref`s resolved.
+- **Schema composition**: confirm imported/local bblock shapes are referenced with `$ref`/`allOf` rather than copied inline.
+- **Context composition**: confirm `context.jsonld` references inherited context files corresponding to inherited schema refs, then maps only local terms.
+- **Dependency graph**: confirm `dependsOn` matches schema/context/transform relationships and has no local cycles.
+- **Filtered reports**: if `build-local/tests/report.json` reports `total: 0`, do not treat that as example validation; run the explicit example-vs-schema check.
+
 ## Output
 
 Validation generates:
@@ -112,6 +120,9 @@ Check:
 1. Schema syntax: `python -m json.tool _sources/<block>/schema.json`
 2. Context validity: `python -m json.tool _sources/<block>/context.jsonld`
 3. Example format: `python -m json.tool _sources/<block>/examples/*.geojson`
+4. Example/schema compliance with resolved refs, especially for STAC and OGC Records inherited schemas
+5. URI format details: inherited schemas may require absolute URI/IRI for `links[].href` while allowing relative `uri-reference` elsewhere
+6. `dependsOn` graph: missing imported refs and local dependency cycles often surface later as postprocess failures
 
 ### Memory Issues
 
@@ -125,5 +136,6 @@ Use this skill when:
 - The `validation-agent` needs to check building block compliance
 - Building blocks are updated with new examples or properties
 - context.jsonld requires validation against examples
+- schema refs, context refs, or `dependsOn` have changed
 - Before committing building block changes to version control
 - Preparing building blocks for publication

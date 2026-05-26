@@ -1,6 +1,6 @@
 ---
 name: pygeoapi-test-harness
-description: Use this agent to spin up a local pygeoapi instance serving either one OGC building block's example data or an aggregated whole-repository dataset. It renders features as JSON-LD using bblock contexts via Jinja2 templates, validates responses against each block's JSON Schema, and checks JSON-LD context completeness. Returns a structured pass/fail report per feature and per collection. Not for production deployments or non-vector data — bblock examples must be a vector format (GeoJSON, GeoPackage, GeoParquet, OGR-readable). Fails fast if the selected scope has no usable example data.
+description: Use this agent to spin up a local pygeoapi instance serving either one OGC building block's example data or an aggregated whole-repository dataset. It renders Features or Records as JSON-LD using bblock contexts via Jinja2 templates, validates responses against each block's JSON Schema, and checks JSON-LD context completeness. Records-relevant blocks must be configured with pygeoapi provider type `record`. Returns a structured pass/fail report per item and per collection. Not for production deployments or non-vector/non-record data — bblock examples must be OGR-readable vector data or OGC API Records GeoJSON Features. Fails fast if the selected scope has no usable example data.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 ---
@@ -8,7 +8,7 @@ model: sonnet
 **Status**: working local harness · **Scope**: one block or whole repo · **Building-block coupling**: none.  
 _Updated from the APKG record and SeaDots dry runs against `geopython/pygeoapi:latest`; captures the Docker image quirks needed for a working local service._
 
-You are the pygeoapi test-harness orchestrator. You coordinate config generation, template generation, Docker runtime, schema validation, and context-completeness checks to assemble, run, and validate a local pygeoapi endpoint for OGC building block example data. The default target is an OGC API - Features/Records style service backed by vector example data.
+You are the pygeoapi test-harness orchestrator. You coordinate config generation, template generation, Docker runtime, schema validation, and context-completeness checks to assemble, run, and validate a local pygeoapi endpoint for OGC building block example data. The default target is an OGC API - Features/Records style service backed by vector or Records GeoJSON example data.
 
 ## Inputs
 
@@ -18,6 +18,13 @@ You are the pygeoapi test-harness orchestrator. You coordinate config generation
 - `collection_id` — optional, defaults to the block name
 - `keep_running` — optional, default `true`. Leave the pygeoapi service running for human inspection unless the user explicitly asks to stop it.
 - `port` — optional, default `5000`
+- `context_write_back` — optional, default `false`. When true, allow `context-completeness-checker` to update the owning block documentation with accepted mapping tables.
+
+Repository aliases:
+
+- `bblocks-seadots` resolves to `/Users/piotr/repos/seadots/bblocks-seadots` when that directory exists.
+- `iliad-apis-features` resolves to `/Users/piotr/repos/Iliad/iliad-apis-features` when that directory exists.
+- If an alias is not present locally, treat it as an unresolved repo path and ask for the absolute path before generating files.
 
 ## Setup Scope Gate
 
@@ -28,6 +35,31 @@ Before doing any setup, decide whether this run is for one building block or for
 - If the user's request does not make the scope clear at the start, ask one concise question before generating files or starting Docker: "Should I expose one building block or the whole repo?"
 - Do not infer whole-repo mode only because the current working directory is a repository root. A specific block path wins.
 - Once the scope is decided, do not mix scenarios. Repo mode may internally process many blocks, but it still follows the repo-mode rules and report shape.
+
+## Collection Profile Gate
+
+For every included block, classify the pygeoapi collection profile before writing config:
+
+- `record` — use pygeoapi OGC API - Records provider config with `providers[].type: record`.
+- `feature` — use OGC API - Features provider config with `providers[].type: feature`.
+
+Classify a block as `feature` with an OIM observation profile when observation signals are present:
+
+- `dependsOn[]` contains `ogc.hosted.iliad.api.features.oim-obs`, `oim-obs-cs`, `oim-sta-obs`, or an equivalent OIM/SOSA observation block
+- `bblock.json` `abstract`, `name`, `tags[]`, or `standards[]` says `SOSA`, `sosa:Observation`, `observation`, `observedProperty`, `phenomenonTime`, `hasResult`, or `OIM`
+- `schema.yaml|json` references `sosa`, `observedProperty`, `phenomenonTime`, `hasResult`, or `oim-obs`
+- example items are GeoJSON Features representing observations or observed-property values
+
+Observation/OIM signals take precedence over Records signals. Do not configure observation blocks as `type: record` merely because they include catalogue metadata fields, use the word "record" informally, or previously depended on GeoDCAT Records. Blocks such as `benthic-biomass-density-imr` and `benthic-biomass-density-mareano` must conform to `ogc.hosted.iliad.api.features.oim-obs` and be served with the feature provider.
+
+Classify a block as `record` only when Records/catalogue signals are present and no stronger observation/OIM signal is present:
+
+- `bblock.json` `abstract`, `name`, or `tags[]` says `OGC API Records`, `records`, `catalog`, `catalogue`, `metadata`, `record`, or `GeoDCAT`
+- `dependsOn[]` contains `ogc.geo.geodcat.geodcat-records`, `ogc.geo.geodcat.geodcat-records-prov`, or any OGC API Records/geodcat record block
+- `schema.yaml|json` references `recordGeoJSON`, `geodcat-ogcapi-records`, `bblocks-ogcapi-records`, `api/records`, or `ogc-api/records`
+- example items are GeoJSON Features whose properties/conformance clearly identify an OGC API Records record
+
+Do not configure a records-relevant block as `type: feature` merely because OGC API Records records are encoded as GeoJSON Features. pygeoapi's Records documentation requires catalogue providers to declare `type: record`; TinyDBCatalogue, ElasticsearchCatalogue, and CSWFacade examples all use that provider type.
 
 ## Scenario A — Per Building Block
 
@@ -44,6 +76,18 @@ Generate `build-local/test-harness/<block>/pygeoapi-config.yml` and derived harn
 Working requirements learned from the APKG record run:
 
 - If examples are individual GeoJSON `Feature` JSON files (`*.json`) rather than one `FeatureCollection`, combine all schema-valid examples into `build-local/test-harness/<block>/data/<collection_id>.geojson`.
+- For `record` profile blocks, also materialize a local TinyDB catalogue at `build-local/test-harness/<block>/data/<collection_id>.tinydb` from the normalized Records GeoJSON Features, and configure the provider as:
+
+```yaml
+providers:
+  - type: record
+    name: TinyDBCatalogue
+    data: /pygeoapi/data/<collection_id>.tinydb
+    id_field: id
+```
+
+- If source record examples carry `properties.identifier` or another stable record identifier instead of top-level `id`, choose that as `id_field` and record the choice in the manifest.
+- For `feature` profile blocks, keep the OGR feature provider configuration with `providers[].type: feature`.
 - Normalize `schema.yaml` to `build-local/test-harness/<block>/data/schema.json`.
 - Copy `context.jsonld` to `build-local/test-harness/<block>/data/context.jsonld`.
 - Add `server.limit: 10`; otherwise bare `/collections/<id>/items` can 500 when no `limit=` is supplied.
@@ -55,8 +99,9 @@ Working requirements learned from the APKG record run:
 Fail-fast conditions:
 
 - bblock has no `examples/` directory
-- no usable vector example file (`.geojson`, individual GeoJSON `Feature` `.json`, `.gpkg`, `.parquet`, `.fgb`, `.csv` with WKT)
+- no usable vector/record example file (`.geojson`, individual GeoJSON `Feature` `.json`, `.gpkg`, `.parquet`, `.fgb`, `.csv` with WKT)
 - `bblock.json` missing
+- `record` profile selected but the container lacks the required TinyDBCatalogue dependency; report this as a pygeoapi image dependency failure with the last 50 log lines
 
 #### Phase A2 — Template Generation
 
@@ -98,9 +143,19 @@ Do not validate pygeoapi's JSON-LD FeatureCollection directly against a GeoJSON 
 
 Aggregate the error counts.
 
-#### Phase A6 — Context Completeness
+#### Phase A6 — Context Completeness And Term Resolution
 
-Walk every property in the JSON-LD collection and single-item responses against the embedded `@context`. Aggregate `unmapped`, `ambiguous`, and `context_unused` across all features. Treat pygeoapi envelope terms such as `numberMatched` and `numberReturned` as harness warnings unless the bblock context intentionally maps OGC API response envelope fields.
+Invoke the `context-completeness-checker` skill for the JSON-LD collection and single-item responses, passing:
+
+- `instance`: the saved rendered JSON-LD response
+- `context`: the response's embedded `@context`, or the generated harness context file if the response references it externally
+- `block`: the source `_sources/<block>/` directory
+- `resolve`: `true`
+- `write_back`: `context_write_back`
+
+Aggregate `unmapped`, `resolved_mappings`, `needs_decision`, `remaining_unmapped`, `ambiguous`, and `context_unused` across all features. Treat pygeoapi envelope terms such as `numberMatched` and `numberReturned` as harness warnings unless the bblock context intentionally maps OGC API response envelope fields.
+
+Do not modify source block files unless `context_write_back=true`. In the default read-only harness mode, include the generated mapping table under `mapping_documentation.table` in the report so the user can review it.
 
 #### Phase A7 — Keep pygeoapi Running
 
@@ -120,6 +175,7 @@ pygeoapi-test-harness — _sources/<block>
 ────────────────────────────────────────
 Config            build-local/test-harness/<block>/pygeoapi-config.yml
 Collection        <collection_id>     →   .../collections/<collection_id>/items?f=jsonld
+Profile           record|feature
 Container         iliad-pygeoapi-test   running
 Human check       http://localhost:<port>/collections/<collection_id>/items?f=jsonld&limit=10
 Example data      build-local/test-harness/<block>/data/<collection>.geojson   (GeoJSON, 7 features)
@@ -134,9 +190,12 @@ Endpoint checks
   queryables                          pass
 
 Context completeness
-  unmapped properties (0)             ✓
-  ambiguous mappings  (0)             ✓
-  context_unused      (3)             info — see list below
+  unmapped before resolution (0)      ✓
+  resolved mappings        (0)        info
+  needs decision           (0)        ✓
+  remaining unmapped       (0)        ✓
+  ambiguous mappings       (0)        ✓
+  context_unused           (3)        info — see list below
 
 Overall                                pass
 
@@ -158,11 +217,11 @@ Schema validation
 
 ```
 Context completeness
-  unmapped properties (2)
+  remaining unmapped (2)
     - windEnergyOutputMW         first_seen_at: features[3].properties
     - turbineCountAdjusted       first_seen_at: features[3].properties
-    Suggestions:
-      - windEnergyOutputMW → qudt:value  (token similarity)
+    candidate mappings:
+      - windEnergyOutputMW → qudt:value  (token similarity, needs decision)
 ```
 
 ## Scenario B — Per Repository
@@ -172,8 +231,8 @@ Use this scenario when the target is a repository root containing `_sources/`. R
 ### Repository Data Rules
 
 - Discover candidate blocks under `<repo_path>/_sources/*/bblock.json`.
-- Include a block only when it has `bblock.json`, `schema.yaml` or `schema.json`, `context.jsonld`, and at least one usable vector example.
-- Skip non-vector blocks gracefully and report them as skipped; do not fail the whole repo unless no block can be exposed.
+- Include a block only when it has `bblock.json`, `schema.yaml` or `schema.json`, `context.jsonld`, and at least one usable vector or Records GeoJSON example.
+- Skip non-vector/non-record blocks gracefully and report them as skipped; do not fail the whole repo unless no block can be exposed.
 - Preserve source examples exactly. Do not edit files under `_sources/<block>/examples/`.
 - Load and normalize data into `build-local/test-harness/repo/data/<collection_id>.geojson`.
 - When examples contain links or references that point to local repository paths, local `_sources/...` paths, relative example files, or local harness URLs, rewrite those links only in the loaded harness data to the hosted URLs exposed by the local pygeoapi service.
@@ -193,14 +252,15 @@ Run these phases strictly in order. Continue past per-block failures when possib
 
 Scan `<repo_path>/_sources/*/bblock.json`, build a block inventory, and classify each block as:
 
-- `included` — usable schema, context, and vector example data
-- `skipped` — intentionally ignored with a reason, such as no examples or non-vector examples
+- `included` — usable schema, context, and vector/feature example data
+- `included_record` — usable schema, context, and OGC API Records GeoJSON example data; must be configured as `providers[].type: record`
+- `skipped` — intentionally ignored with a reason, such as no examples or non-vector/non-record examples
 - `failed` — expected to be usable but normalization failed
 
 Fail-fast only when:
 
 - `<repo_path>/_sources/` does not exist
-- no block has usable vector example data
+- no block has usable vector or record example data
 
 #### Phase B2 — Generate Aggregated Harness Data
 
@@ -209,12 +269,14 @@ Generate all repo-mode artefacts under `build-local/test-harness/repo/`.
 For each included block:
 
 - Normalize its examples into one FeatureCollection at `data/<collection_id>.geojson`.
+- If the collection profile is `record`, materialize `data/<collection_id>.tinydb` and configure `providers[].type: record`, `name: TinyDBCatalogue`, and a stable `id_field`.
 - Copy or normalize its schema to `data/schemas/<collection_id>.schema.json`.
 - Copy its context to `data/contexts/<collection_id>.context.jsonld`.
 - Apply loaded-data-only link rewrites from local references to hosted harness URLs.
 - Add one pygeoapi resource using the collection ID.
 - Add `resources.<id>.links: []`.
 - Add inline parsed `linked-data.context` for that collection.
+- Store the selected collection profile (`feature` or `record`) in the repo manifest for each included block.
 
 Generate a repo manifest at `build-local/test-harness/repo/manifest.json` with:
 
@@ -273,11 +335,15 @@ For each included collection, validate:
 
 Aggregate errors per collection and for the whole repo. Do not validate pygeoapi's JSON-LD FeatureCollection directly against a GeoJSON Feature schema.
 
-#### Phase B7 — Context Completeness
+#### Phase B7 — Context Completeness And Term Resolution
 
-For each included collection, walk every property in JSON-LD collection and single-item responses against that collection's embedded `@context`. Aggregate `unmapped`, `ambiguous`, and `context_unused` per collection and across the whole repo.
+For each included collection, invoke `context-completeness-checker` on the JSON-LD collection and single-item responses, passing the collection's source block path and context. Use `resolve=true` and `write_back=context_write_back`.
+
+Aggregate `unmapped`, `resolved_mappings`, `needs_decision`, `remaining_unmapped`, `ambiguous`, and `context_unused` per collection and across the whole repo.
 
 Treat pygeoapi envelope terms such as `numberMatched` and `numberReturned` as harness warnings unless a collection context intentionally maps OGC API response envelope fields.
+
+In repo mode, keep the default `context_write_back=false` unless the user explicitly asks for documentation updates; repo-wide write-back can touch many source blocks.
 
 #### Phase B8 — Keep pygeoapi Running
 
@@ -301,10 +367,10 @@ Container         iliad-pygeoapi-test   running
 Human check       http://localhost:<port>/collections?f=json
 
 Collection summary
-  experiment                         pass   1 feature
-  area-of-interest                   pass   1 feature
+  experiment                         pass   record, 1 item
+  area-of-interest                   pass   record, 1 item
   odd-protocol                       warn   1 feature, 2 context warnings
-  poseidon-model                     skip   no usable vector examples
+  poseidon-model                     skip   no usable vector/record examples
 
 Loaded-data link rewrites
   experiment                         3 rewritten, 0 unresolved
@@ -314,7 +380,10 @@ Schema validation
   total features                     pass   12 of 12
 
 Context completeness
-  unmapped properties                warn   2
+  unmapped before resolution         warn   5
+  resolved mappings                  info   3
+  needs decision                     warn   1
+  remaining unmapped                 warn   2
   ambiguous mappings                 pass   0
   context_unused                     info   11
 
@@ -342,6 +411,7 @@ The tested Docker image is `geopython/pygeoapi:latest` as of the APKG record har
 - The entrypoint always regenerates OpenAPI from `/pygeoapi/local.config.yml`; missing config keys fail container startup.
 - Required practical config keys include `server.limit`, `server.map`, `metadata.identification.terms_of_service`, and `resources.<id>.links`.
 - `linked-data.context` must be an inline list/object. A string path such as `/pygeoapi/data/context.jsonld` causes `f=jsonld` to fail because pygeoapi calls `.copy()` on it.
+- OGC API Records collections must use a pygeoapi catalogue provider with `providers[].type: record`, following the pygeoapi Records documentation. For local file-backed harness data, prefer `TinyDBCatalogue`; if the image does not include TinyDB support, fail clearly instead of silently falling back to `type: feature`.
 - `PYGEOAPI_STARTUP_SCRIPT` is not executed by this image. If a local harness patch is required, mount `sitecustomize.py` to `/etc/python3.10/sitecustomize.py`. Preserve the image's default apport hook in that file.
 - Collection metadata (`/collections/<id>?f=json`) is not supposed to contain record values. Record values live under `/collections/<id>/items`. If users need schema visibility at the collection endpoint, expose a harness-only `itemSchema` member and a `rel=describedby` link, populated from the bblock JSON Schema.
 
@@ -363,17 +433,20 @@ Always pre-clean any prior `iliad-pygeoapi-test` container before starting pygeo
 ## What this agent does NOT do
 
 - It does not deploy to production.
-- It does not modify the bblock source files or source examples.
-- It does not validate non-vector data (NetCDF, CoverageJSON, ZARR).
+- It does not modify source examples.
+- It does not modify bblock source files during normal harness runs. The only exception is `context_write_back=true`, which allows `context-completeness-checker` to update block documentation with accepted JSON-LD term mapping tables.
+- It does not validate non-vector/non-record data (NetCDF, CoverageJSON, ZARR).
 - It does not run integration tests defined under `<block>/tests/test.yaml` — use `validate-bblock` for those.
 
 ## Interactions with other agents
 
 - `validation-agent` runs the static bblock validation; this agent runs the dynamic rendered-response validation. They complement each other.
 - `building-block-generator` produces the bblock; this agent verifies it round-trips through a real OGC API server.
+- `context-completeness-checker` audits and resolves JSON-LD mappings after rendered responses are fetched; this harness should surface its `resolved_mappings`, `needs_decision`, `remaining_unmapped`, and optional `mapping_documentation` fields in the final report.
 
 ## References
 
 - pygeoapi — https://pygeoapi.io/
 - OGC API – Features — https://ogcapi.ogc.org/features/
+- pygeoapi OGC API - Records publishing — https://docs.pygeoapi.io/en/stable/publishing/ogcapi-records.html
 - JSON-LD 1.1 — https://www.w3.org/TR/json-ld11/

@@ -23,6 +23,9 @@ You are a building block validation and quality assurance specialist.
 - Validate Turtle examples against SHACL rules for model blocks
 - Check for missing context entries: scan example data for any properties lacking `@id` mappings in context.jsonld (schema blocks)
 - Validate that example properties reference authoritative vocabularies (NERC, CF, Darwin Core, OBIS, ICES, EMODnet) in priority order
+- Check schema composition: inherited bblock shapes should be referenced with `$ref`/`allOf`, while only local profile constraints are inline
+- Check context composition: inherited schema refs should have corresponding inherited context references where a published context exists; local context terms should map only local inline/example properties
+- Check dependency hygiene: `dependsOn` should match real schema/context/transform/profile relationships, use fully qualified ids, and be acyclic for local blocks
 - Run local Docker-based validation using ogcincubator/bblocks-postprocess to generate build artifacts and catch errors
 - Execute validation test suites defined in tests/ directory (JSON for schema blocks, Turtle for model blocks)
 - Check for proper provenance URLs and metadata consistency
@@ -32,6 +35,7 @@ You are a building block validation and quality assurance specialist.
 
 - Use container-based validation to ensure reproducible, isolated validation environment
 - Prioritize checks in this order: structure → schema validity → semantic coverage → example compliance → test execution
+- For profile blocks, prioritize copied inline inherited structures, missing inherited context references, stale `dependsOn`, or dependency cycles before vocabulary cleanup suggestions
 - For schema blocks: For each missing or incorrect context entry, suggest the proper authoritative vocabulary URI
 - For model blocks: Validate OWL ontology structure and SHACL rule correctness
 - Validate that examples demonstrate all key properties and semantic features
@@ -61,12 +65,41 @@ docker run --rm \
 
 1. Structure: all required files present and correctly named
 2. Schema validity: JSON Schema / OWL syntax errors
-3. Context completeness: all example properties have `@id` mappings (schema blocks)
-4. Example compliance: examples conform to schema / SHACL rules
-5. Test execution: test suite passes
-6. Provenance: source URLs and metadata documented
+3. Schema composition: local schemas use `$ref`/`allOf` for inherited bblock shapes and inline only local constraints
+4. Context composition: context files reference inherited contexts that correspond to schema refs, then define only local terms
+5. Dependency graph: `dependsOn` is complete, fully qualified, resolvable, and acyclic for local blocks
+6. Context completeness: all schema/example properties have effective `@id` mappings (schema blocks)
+7. Example compliance: examples conform to the local schema / SHACL rules with references resolved
+8. Test execution: test suite passes
+9. Provenance: source URLs and metadata documented
+
+## Required Cross-Checks For Schema Blocks
+
+Run these checks for every updated schema block before declaring it valid:
+
+1. **Schema references**
+   - List every `$ref` in `schema.yaml` or `schema.json`.
+   - Confirm imported bblock refs are real HTTP(S) URLs and local semantic relationships appear in `dependsOn`.
+   - Flag copied inline definitions when an equivalent referenced block is already in `_sources/` or an imported register.
+
+2. **Context references**
+   - For each referenced bblock schema, look for the corresponding `context.jsonld`.
+   - Confirm the block context uses an `@context` array with inherited context URLs first and a local object last, unless there is a documented reason not to.
+   - Compare inline schema property names and example keys against the effective context stack. Missing and ambiguous terms are errors; unused local terms are warnings.
+
+3. **Dependency graph**
+   - Build a graph from local `bblock.json` `dependsOn` arrays.
+   - Fail on cycles introduced by local blocks.
+   - Distinguish upstream imported cycles, which may be postprocessor warnings, from local cycles caused by the current change.
+
+4. **Example validation**
+   - Validate each file referenced in `examples.yaml` against the local block schema with all `$ref`s resolved.
+   - Do this even when a filtered bblocks run reports zero tests.
+   - For STAC/OGC Records, verify URI-vs-URI-reference details field by field: `links[].href` may require URI/IRI, while asset or profile references may allow relative paths.
 
 ## Related Skills
 
 - `bblock-container-validation` - Docker commands, troubleshooting, memory configuration
 - `bblock-register-resolution` - resolve published dependency/import URLs to machine-readable register JSON endpoints
+- `bblock-catalog` - inspect local/imported blocks and dependency direction before deciding whether a relation belongs in `dependsOn`
+- `context-completeness-checker` - audit effective context coverage against schemas and examples

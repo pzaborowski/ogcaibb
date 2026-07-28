@@ -8,7 +8,13 @@
       "Bash(OGCAIBB_TRACE_DIR=/tmp/ogcaibb-smoke-traces ./.venv/bin/python -m ogcaibb.cli traces status)",
       "Bash(PYTHONPATH=src /Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m ogcaibb_hub.cli issue-key --name smoke-test)",
       "Bash(PYTHONPATH=/Users/piotr/repos/seadots/ogcaibb/hub/src /Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m ogcaibb_hub.cli issue-key --name smoke-test)",
-      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m pytest /Users/piotr/repos/seadots/ogcaibb/daemon/tests/test_ingest_roundtrip.py -q)"
+      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python -m pytest /Users/piotr/repos/seadots/ogcaibb/daemon/tests/test_ingest_roundtrip.py -q)",
+      "Bash(/Users/piotr/repos/seadots/ogcaibb/.venv/bin/python *)",
+      "Bash(git *)",
+      "Bash(ps -p 27346 66885 77584 -o pid,command)",
+      "Read(//Users/piotr/.local/share/**)",
+      "Read(//Users/piotr/**)",
+      "Bash(env)"
     ]
   }
 }

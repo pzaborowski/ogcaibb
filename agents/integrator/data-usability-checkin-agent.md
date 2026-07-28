@@ -1,6 +1,6 @@
 ---
 name: data-usability-checkin-agent
-description: Use this agent when a user wants to assess a source dataset for usability against SeaDOTs-style criteria, select or confirm a target set of building blocks, walk through the iliad-apis-features check-in process, and generate a staged package of three related building blocks: a source-data block with representative examples, a target-model block selected from repo/imported matches, and a metadata/catalog block linking both modes with OGC Records and relevant STAC extensions. Not for generic metadata generation without usability assessment or for non-check-in tasks.
+description: Use this agent when a user wants to assess a source dataset for usability against SeaDOTs-style criteria, select or confirm a target set of building blocks, walk through the iliad-apis-features check-in process, and generate a staged package of three related building blocks as follows a source-data block with representative examples, a target-model block selected from repo/imported matches, and a metadata/catalog block linking both modes with OGC Records and relevant STAC extensions. Not for generic metadata generation without usability assessment or for non-check-in tasks.
 tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch
 model: sonnet
 ---

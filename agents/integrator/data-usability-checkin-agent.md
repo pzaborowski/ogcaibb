@@ -98,6 +98,23 @@ Score the source against the usability criteria. Produce the assessment table fo
 - Resolve dependency URLs with `bblock-register-resolution`.
 - Document the ranking for the report.
 
+### Step 3a — Catalog-record block reuse decision (mandatory when BB3 is a catalog-record block)
+
+When the requested deliverable is a catalog-record or metadata block (BB3), inspect the repository first for existing catalog-oriented blocks before proposing a new one. Treat blocks such as `catalog-data`, `catalog-data-tabular`, `catalog-data-multidim`, `catalog-application-package`, `catalog-workflow`, `catalog-execution`, `catalog-input`, and `catalog-output` as first-class candidates when their schema/profile matches the incoming data type and properties.
+
+Use this decision flow:
+
+1. Compare the incoming dataset characteristics to the existing catalog blocks by data type (tabular, multidimensional, vector, workflow/application package, etc.), required properties, and semantic profile.
+2. If one or more existing catalog blocks are a strong fit, do not immediately create a new BB3. Instead, present the best match to the user and ask for confirmation with one of these options:
+   - Good fit based on the data type and properties available — confirm to add an example for the existing building block.
+   - Good fit but something is missing either in the data or the building block — ask whether to extend the existing block or create a new one.
+   - No good match — confirm to create new block(s).
+3. If the user chooses “add example”, reuse the existing catalog block and add a representative example only.
+4. If the user chooses “extend existing”, extend the existing catalog block’s schema/context/examples as needed, while clearly documenting what is missing.
+5. If the user chooses “create new block(s)”, stage a new BB3 (and, if needed, supporting blocks) rather than modifying the existing catalog block.
+
+When presenting the recommendation, include the candidate block name, why it matches, and what would need to change for the other two options. Only proceed with implementation after the user confirms the chosen path.
+
 ### Step 4 — Generate the three building blocks
 
 Delegate each block to `building-block-generator` with explicit inputs. Pass the full property list from Step 1 so the generator can enforce the property-coverage contract.
